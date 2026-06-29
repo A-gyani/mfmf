@@ -1,0 +1,14 @@
+{
+  "name": "MF, MF!",
+  "short_name": "MF MF",
+  "description": "Manage Finance, MF! — read your q-commerce orders, tag and track spending.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#eef4fb",
+  "theme_color": "#2c5e8f",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
