@@ -154,9 +154,12 @@
 
     .itemCard{background:var(--surface-2); border:1px solid var(--outline); border-radius:15px; padding:12px; margin-bottom:10px}
     .itemRow2{display:flex; gap:8px; margin-top:9px; align-items:center}
-    .amtWrap{position:relative; width:118px; flex:0 0 auto}
+    .amtWrap{position:relative; width:100px; flex:0 0 auto}
     .amtWrap .cur{position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--muted); font-weight:600; font-size:15px}
     .amtWrap input{padding-left:26px}
+    .qtyWrap{position:relative; width:62px; flex:0 0 auto}
+    .qtyWrap .cur{position:absolute; left:11px; top:50%; transform:translateY(-50%); color:var(--muted); font-weight:700; font-size:15px}
+    .qtyWrap input{padding-left:24px; padding-right:6px}
     .catSel{flex:1}
     .delItem{flex:0 0 auto; width:44px; height:46px; border-radius:12px; background:#fff; border:1px solid var(--outline); color:var(--danger); display:flex; align-items:center; justify-content:center}
     .seg{display:flex; background:#e9eff6; border-radius:var(--pill); padding:3px; margin-top:10px}
@@ -607,15 +610,16 @@ function editOrder(id){
   mVendor=(r.vendor && r.vendor!=='Auto-detect') ? r.vendor : 'Other'; setManVendor(mVendor);
   document.getElementById('mDate').value=localDateStr(toMs(r.orderDate)||toMs(r.createdAt)||Date.now());
   document.getElementById('mItems').innerHTML='';
-  (r.items||[]).forEach(it=>addItemRow(it.name, it.price, it.category, it.tag||'personal'));
+  (r.items||[]).forEach(it=>addItemRow(it.name, it.price, it.category, it.tag||'personal', it.qty||1, it.unit||''));
   if(!(r.items||[]).length) addItemRow();
   recalcTotal(); go('manual');
 }
-function addItemRow(name='', price='', category='General', tag='personal'){
-  const wrap=document.createElement('div'); wrap.className='itemCard'; wrap.dataset.tag=tag;
+function addItemRow(name='', price='', category='General', tag='personal', qty=1, unit=''){
+  const wrap=document.createElement('div'); wrap.className='itemCard'; wrap.dataset.tag=tag; wrap.dataset.unit=unit||'';
   const amt = (price!=='' && price!=null) ? Number(price) : '';
   wrap.innerHTML=`<input class="iName" placeholder="Item name" value="${esc(name)}" oninput="recalcTotal()" />
     <div class="itemRow2">
+      <div class="qtyWrap"><span class="cur">×</span><input class="iQty" type="number" inputmode="numeric" min="1" placeholder="1" value="${Number(qty)||1}" /></div>
       <div class="amtWrap"><span class="cur">₹</span><input class="iAmt" type="number" inputmode="decimal" placeholder="0" value="${amt}" oninput="recalcTotal()" /></div>
       <select class="catSel" data-prev="${esc(category)}" onchange="catChanged(this)">${catOptions(category)}</select>
       <button class="delItem" onclick="this.closest('.itemCard').remove(); recalcTotal()"><span class="msr">delete</span></button>
@@ -642,7 +646,8 @@ function saveManual(){
   const rows=[...document.querySelectorAll('#mItems .itemCard')];
   const items=rows.map(r=>{ const cs=r.querySelector('.catSel').value;
     return { id:uid(), name:r.querySelector('.iName').value.trim(),
-      qty:1, price:Number(r.querySelector('.iAmt').value)||0, category:(cs&&cs!=='__add__')?cs:'General', tag:r.dataset.tag||'personal' }; })
+      qty:Math.max(1, Math.round(Number(r.querySelector('.iQty').value)||1)), unit:r.dataset.unit||'',
+      price:Number(r.querySelector('.iAmt').value)||0, category:(cs&&cs!=='__add__')?cs:'General', tag:r.dataset.tag||'personal' }; })
     .filter(it=>it.name && it.price>0);
   if(!items.length){ toast('Add at least one item with a price'); return; }
   const total=items.reduce((s,it)=>s+it.price,0);
