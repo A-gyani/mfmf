@@ -29,6 +29,7 @@
     body{ background:var(--bg); color:var(--text);
       font-family:'Roboto',-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
       padding:0 0 env(safe-area-inset-bottom); min-height:100%; }
+    body::before{ content:''; position:fixed; inset:0; z-index:-1; background:url('bg.jpg') center center / cover no-repeat; }
     .msr{font-family:'Material Symbols Rounded'; font-weight:normal; font-style:normal; font-size:24px; line-height:1;
       letter-spacing:normal; text-transform:none; display:inline-block; white-space:nowrap; direction:ltr;
       -webkit-font-feature-settings:'liga'; -webkit-font-smoothing:antialiased; vertical-align:middle}
@@ -38,8 +39,7 @@
     .screen.hidden{display:none}
 
     /* ---------- HOME hero ---------- */
-    .hero{ position:relative; min-height:200px; padding:calc(env(safe-area-inset-top) + 16px) 18px 58px;
-      background:linear-gradient(180deg, rgba(255,255,255,0) 55%, rgba(234,242,251,.65) 100%), url('header.jpg') center 28% / cover; }
+    .hero{ position:relative; padding:calc(env(safe-area-inset-top) + 24px) 18px 6px; background:transparent; }
     .heroTop{display:flex; align-items:center; justify-content:space-between}
     .brand{font-family:'Roboto',sans-serif; font-size:30px; font-weight:800; color:#173f63; letter-spacing:-.6px;
       text-shadow:0 1px 8px rgba(255,255,255,.6)}
@@ -50,7 +50,7 @@
       display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:700; box-shadow:0 2px 8px rgba(20,50,90,.14)}
 
     /* overlapping balance card */
-    .balanceCard{ margin:-44px 16px 0; position:relative; z-index:2; background:var(--surface); border-radius:var(--radius-lg);
+    .balanceCard{ margin:12px 16px 0; position:relative; z-index:2; background:var(--surface); border-radius:var(--radius-lg);
       box-shadow:var(--shadow); padding:18px 18px 16px; }
     .bLbl{font-size:12.5px; color:var(--muted); font-weight:500}
     .bAmt{font-size:38px; font-weight:700; letter-spacing:-1px; line-height:1.08; margin-top:2px; color:#101b26}
@@ -237,7 +237,6 @@
   <!-- ===================== HOME ===================== -->
   <section id="home" class="screen">
     <div class="hero">
-      <div class="heroBar"><span class="avatar" id="avatar">·</span></div>
       <div class="brandSplash">
         <img src="speed-rupee-logo.svg" class="brandLogo" alt="" />
         <span class="brand">MF, MF!</span>
@@ -815,7 +814,6 @@ async function pushLocalReceipts(){
   for(const r of state.receipts){ if(r._needsUpload){ const ok=await window.__uploadReceiptDoc(r); if(ok){ delete r._needsUpload; saveLocal(); } } }
 }
 window.__onAuth=(signedIn,label)=>{ window.__signedIn=signedIn;
-  document.getElementById('avatar').textContent=(label&&label[0]?label[0]:'·').toUpperCase();
   if(signedIn){ flushQueue(); pushLocalReceipts(); } renderSyncRow(); };
 window.__applyRemoteReceipts=(arr)=>{
   const clean=arr.filter(r=>r&&r.id).map(r=>({...r, createdAt:toMs(r.createdAt), orderDate:toMs(r.orderDate)}));

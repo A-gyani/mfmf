@@ -4,5 +4,5 @@ _work/
 *.log
 .claude/
 *.avif
-preview.png
+*.png
 .DS_Store
