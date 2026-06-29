@@ -38,13 +38,14 @@
     .screen.hidden{display:none}
 
     /* ---------- HOME hero ---------- */
-    .hero{ position:relative; min-height:172px; padding:calc(env(safe-area-inset-top) + 16px) 18px 60px;
+    .hero{ position:relative; min-height:200px; padding:calc(env(safe-area-inset-top) + 16px) 18px 58px;
       background:linear-gradient(180deg, rgba(255,255,255,0) 55%, rgba(234,242,251,.65) 100%), url('header.jpg') center 28% / cover; }
     .heroTop{display:flex; align-items:center; justify-content:space-between}
-    .brand{font-family:'Roboto Serif',serif; font-size:23px; font-weight:600; color:#194a74; letter-spacing:-.3px;
-      text-shadow:0 1px 6px rgba(255,255,255,.6)}
-    .brandLock{display:flex; align-items:center; gap:10px}
-    .brandLogo{width:36px; height:36px; border-radius:10px; box-shadow:0 2px 8px rgba(20,50,90,.18); display:block}
+    .brand{font-family:'Roboto',sans-serif; font-size:30px; font-weight:800; color:#173f63; letter-spacing:-.6px;
+      text-shadow:0 1px 8px rgba(255,255,255,.6)}
+    .heroBar{display:flex; justify-content:flex-end}
+    .brandSplash{display:flex; flex-direction:column; align-items:center; gap:10px; margin-top:4px}
+    .brandLogo{width:64px; height:64px; border-radius:18px; box-shadow:0 4px 14px rgba(20,50,90,.22); display:block}
     .avatar{width:38px; height:38px; border-radius:50%; background:rgba(255,255,255,.75); color:var(--primary);
       display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:700; box-shadow:0 2px 8px rgba(20,50,90,.14)}
 
@@ -236,9 +237,10 @@
   <!-- ===================== HOME ===================== -->
   <section id="home" class="screen">
     <div class="hero">
-      <div class="heroTop">
-        <div class="brandLock"><img src="speed-rupee-logo.svg" class="brandLogo" alt="" /><span class="brand">MF, MF!</span></div>
-        <span class="avatar" id="avatar">·</span>
+      <div class="heroBar"><span class="avatar" id="avatar">·</span></div>
+      <div class="brandSplash">
+        <img src="speed-rupee-logo.svg" class="brandLogo" alt="" />
+        <span class="brand">MF, MF!</span>
       </div>
     </div>
     <div class="balanceCard">
