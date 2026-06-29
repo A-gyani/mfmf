@@ -175,7 +175,8 @@ values added this session). Constants: `VENDORS`, `VENDOR_COLOR`, `CATS`.
 - **Add (screenshot):** `openAdd`, `onFiles`/`compress` (canvas-resize to JPEG dataURL, kept
   < ~780 KB so each fits Firestore's 1 MB doc cap), `submitOrder` (queues + uploads).
 - **Manual / editor:** `openManual` (new), `editOrder(id)` (loads an existing order into the
-  same form), `addItemRow` (name/₹/category/tag), `setRowTag`, `recalcTotal`, `catChanged`
+  same form), `addItemRow` (name / **qty `×`** / ₹ line-total / category / tag — preserves `qty`
+  and `unit`; never hardcode qty), `setRowTag`, `recalcTotal`, `catChanged`
   (the "+ Add category…" flow), `saveManual` (create or update), `deleteOrder`, `cancelManual`.
 - **Vendor/category pickers:** `allVendors`/`allCats` derive options from base lists + values
   already used in receipts + `extraVendors/extraCats`; `renderChips` (with a "+ New" chip),
@@ -289,6 +290,9 @@ Each run appends to `automation/analyze.log`.
 - **Status flow** drives everything: only `ready`/`tagged` receipts count in Home/Insights/Export;
   `duplicate` shows a dismissible notice; `pending`/`analyzing` show a spinner.
 - After mutating `state`, call `saveReceipt(r)` (persists + syncs) or `saveLocal()` then `rerender()`.
+- **`item.price` is the LINE TOTAL** (qty × per-unit), not per-unit; `item.qty` is the count;
+  per-unit is derived (`price/qty`). "Most bought" sums `qty` (units), not occurrences. Never
+  hardcode `qty` — the editor must read/write it (a past bug hardcoded `qty:1` and wiped quantities).
 
 ---
 
