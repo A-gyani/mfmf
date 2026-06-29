@@ -57,8 +57,11 @@
     .splitBar{display:flex; height:9px; border-radius:99px; overflow:hidden; background:#e8eef6; margin:15px 0 13px}
     .splitBar .sp{height:100%; transition:width .5s cubic-bezier(.3,.7,.3,1)}
     .splitBar .sp.pink{background:var(--pink)} .splitBar .sp.blue{background:var(--primary-bright)} .splitBar .sp.gray{background:#c2ccd6}
-    .reconLine{font-size:12.5px; color:var(--muted); font-weight:600; text-align:center; margin:10px 4px 0}
-    .reconLine b{color:var(--text); font-weight:700}
+    .chgPanel{background:var(--surface); border-radius:var(--radius); box-shadow:var(--shadow-card); padding:2px 14px; margin-top:4px}
+    .chgRow{display:flex; justify-content:space-between; align-items:center; padding:9px 0; font-size:13.5px; border-bottom:1px solid #eef2f7}
+    .chgRow:last-child{border-bottom:none}
+    .chgRow.muted{color:var(--muted)} .chgRow.tot{font-weight:700; color:#101b26}
+    .chgHint{font-size:12px; color:var(--muted); margin:9px 6px 0; text-align:center}
     .bStats{display:flex; gap:18px}
     .bStat{display:flex; align-items:center; gap:7px; font-size:13px; color:var(--muted); font-weight:500}
     .bStat b{color:var(--text); font-weight:700; font-size:14px}
@@ -677,7 +680,7 @@ function saveManual(){
     const back=manualReturn; editingId=null; toast('Order updated'); go(back==='add'?'orders':back);
     return;
   }
-  const receipt={ id:uid(), vendor:mVendor, status, orderDate:dateMs, total, items, createdAt:Date.now(), manual:true };
+  const receipt={ id:uid(), vendor:mVendor, status, orderDate:dateMs, total, items, createdAt:Date.now(), manual:true, source:'manual' };
   if(!window.__signedIn) receipt._needsUpload=true;
   state.receipts.push(receipt); saveLocal();
   if(window.__signedIn && window.__uploadReceiptDoc) window.__uploadReceiptDoc(receipt);
@@ -728,6 +731,46 @@ function monthlyTrend(){
 // collapse cosmetic name variants so "Most bought" counts a product once
 // (e.g. "Gold Flake Indie Mint", "…Cigarette", "…- 10 Sticks" → one row)
 function canonName(s){ return String(s||'').toLowerCase().split(' - ')[0].replace(/\bcigarettes?\b/g,'').replace(/[^a-z0-9]+/g,' ').trim(); }
+// per-order charges with reconciliation: trust the itemised delivery/tax/handling only when
+// items + charges − discount ≈ total (exact for PDFs); otherwise the whole gap is "unaccounted".
+function orderReconciles(r){
+  const f=r.fees||{}, itemSum=(r.items||[]).reduce((s,it)=>s+(Number(it.price)||0),0);
+  const dlv=Number(f.delivery)||0, hnd=(Number(f.handling)||0)+(Number(f.packaging)||0), tp=Number(f.tip)||0, dsc=Number(f.discount)||0, tx=Number(r.tax)||0;
+  const t=Number(r.total)||0;
+  return Math.abs((t-itemSum)-(dlv+hnd+tp+tx-dsc)) <= Math.max(2, t*0.01);
+}
+function chargeAgg(rs){
+  const c={delivery:0,taxes:0,handling:0,tip:0,savings:0,unaccounted:0,pdfN:0,n:rs.length};
+  rs.forEach(r=>{
+    const f=r.fees||{}, itemSum=(r.items||[]).reduce((s,it)=>s+(Number(it.price)||0),0);
+    const dlv=Number(f.delivery)||0, hnd=(Number(f.handling)||0)+(Number(f.packaging)||0), tp=Number(f.tip)||0, dsc=Number(f.discount)||0, tx=Number(r.tax)||0;
+    const t=Number(r.total)||0, gap=t-itemSum;
+    if(r.source==='pdf') c.pdfN++;
+    if(orderReconciles(r)){ c.delivery+=dlv; c.taxes+=tx; c.handling+=hnd; c.tip+=tp; c.savings+=dsc; c.unaccounted+=(gap-(dlv+hnd+tp+tx-dsc)); }
+    else c.unaccounted+=gap;
+  });
+  return c;
+}
+function chargesPanel(rs, itemsTotal, total){
+  const c=chargeAgg(rs);
+  const row=(l,v,neg)=> Math.round(v)!==0 ? `<div class="chgRow"><span>${l}</span><span>${neg?'− ':''}${inr(Math.abs(v))}</span></div>` : '';
+  const lines=row('Delivery',c.delivery)+row('Taxes (GST)',c.taxes)+row('Handling &amp; packaging',c.handling)+row('Tip',c.tip)+row('Savings',c.savings,true)
+    +(Math.round(c.unaccounted)!==0?`<div class="chgRow muted"><span>Other charges</span><span>${inr(c.unaccounted)}</span></div>`:'');
+  const hint=(Math.round(c.unaccounted)>Math.max(5,total*0.01) && c.pdfN<c.n)
+    ? `<div class="chgHint">Add invoice PDFs for exact taxes &amp; delivery — ${c.pdfN}/${c.n} orders are exact.</div>` : '';
+  return `<div class="sectionLabel">Charges &amp; taxes</div><div class="chgPanel">`
+    + `<div class="chgRow"><span>Items</span><span>${inr(itemsTotal)}</span></div>${lines}`
+    + `<div class="chgRow tot"><span>Total spend</span><span>${inr(total)}</span></div></div>${hint}`;
+}
+// settle-up: an order's net delivery+taxes+charges (− discount) apportioned to the shared items'
+// share of the bill — only when the order reconciles (exact, mostly PDFs); else item-only.
+function sharedChargeShare(r){
+  const items=r.items||[], itemSum=items.reduce((s,it)=>s+(Number(it.price)||0),0);
+  const sharedSum=items.filter(it=>it.tag==='shared').reduce((s,it)=>s+(Number(it.price)||0),0);
+  if(itemSum<=0 || sharedSum<=0 || !orderReconciles(r)) return 0;
+  const f=r.fees||{}, net=(Number(f.delivery)||0)+(Number(f.handling)||0)+(Number(f.packaging)||0)+(Number(f.tip)||0)+(Number(r.tax)||0)-(Number(f.discount)||0);
+  return Math.round(net*(sharedSum/itemSum)*100)/100;
+}
 function renderInsights(){
   const body=document.getElementById('insightsBody');
   const rs=periodReceipts();
@@ -739,7 +782,7 @@ function renderInsights(){
       cat[it.category||'General']=(cat[it.category||'General']||0)+p;
       const nm=(it.name||'').trim(); if(nm){ const k=canonName(nm)||nm.toLowerCase(); if(!names[k]) names[k]={label:nm,qty:0,spend:0,orders:0}; else if(nm.length<names[k].label.length) names[k].label=nm; names[k].qty+=Number(it.qty)||1; names[k].spend+=p; names[k].orders++; } }); });
   const orders=rs.length, avg=orders?total/orders:0;
-  const itemsTotal=personal+shared+untagged, taxes=Math.round((total-itemsTotal)*100)/100, denom=itemsTotal||1;
+  const itemsTotal=personal+shared+untagged, denom=itemsTotal||1;
   const catArr=Object.entries(cat).sort((a,b)=>b[1]-a[1]); const catMax=catArr.length?catArr[0][1]:1;
   const catBars=catArr.map(([c,v],i)=>`<div class="barRow"><div class="lab"><span>${esc(c)}</span><span class="amt">${inr(v)}</span></div><div class="track"><div class="fill" style="width:${Math.max(4,v/catMax*100)}%;background:${CAT_COLORS[i%CAT_COLORS.length]}"></div></div></div>`).join('');
   const venRows=Object.entries(ven).sort((a,b)=>b[1].sum-a[1].sum).map(([v,o])=>`<div class="vrow">${vendorAva(v)}<div class="info"><div class="nm">${esc(v)}</div><div class="sub">${o.count} ${o.count===1?'order':'orders'}</div></div><div class="amt">${inr(o.sum)}</div></div>`).join('');
@@ -752,7 +795,7 @@ function renderInsights(){
         <div class="statCard"><div class="k">Avg order</div><div class="v">${inr(avg)}</div></div>
         <div class="statCard"><div class="k">Personal · Shared</div><div class="v" style="font-size:15px">${inr(personal)} · ${inr(shared)}</div></div>
       </div>`
-    + `<div class="reconLine">Items <b>${inr(itemsTotal)}</b> + taxes &amp; charges <b>${inr(taxes)}</b> = total <b>${inr(total)}</b></div>`
+    + chargesPanel(rs, itemsTotal, total)
     + `<div class="sectionLabel">Personal vs shared</div><div class="splitBar" style="margin:0"><div class="sp pink" style="width:${personal/denom*100}%"></div><div class="sp blue" style="width:${shared/denom*100}%"></div><div class="sp gray" style="width:${untagged/denom*100}%"></div></div>`
     + `<div class="sectionLabel">By category</div>${catBars}`
     + `<div class="sectionLabel">By vendor</div>${venRows}`
@@ -798,23 +841,29 @@ async function exportExcel(mode){
   const wb=XLSX.utils.book_new();
   const sharedAoa=[['Date','Vendor','Item','Category','Price (₹)']];
   rs.forEach(r=>(r.items||[]).forEach(it=>{ if(it.tag==='shared') sharedAoa.push([dstr(r),r.vendor||'',it.name||'',it.category||'',Number(it.price)||0]); }));
-  const sharedTotal=sharedAoa.slice(1).reduce((s,row)=>s+(row[4]||0),0);
+  const sharedItemsTotal=sharedAoa.slice(1).reduce((s,row)=>s+(row[4]||0),0);
+  let sharedChargesTotal=0; const chgRows=[];
+  rs.forEach(r=>{ const sc=sharedChargeShare(r); if(sc){ chgRows.push([dstr(r),r.vendor||'','Delivery & taxes (your share)','',sc]); sharedChargesTotal+=sc; } });
+  if(chgRows.length){ sharedAoa.push([]); sharedAoa.push(['','Shared delivery & taxes (proportional)','','','']); chgRows.forEach(row=>sharedAoa.push(row)); }
+  const sharedTotal=Math.round((sharedItemsTotal+sharedChargesTotal)*100)/100;
   sharedAoa.push([]); sharedAoa.push(['','','','Total',sharedTotal]);
   if(mode==='shared'){
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sharedAoa), 'Shared items');
     XLSX.writeFile(wb, fname('shared')); toast('Downloaded'); return;
   }
-  const ordersAoa=[['Date','Vendor','Items','Total (₹)','Personal (₹)','Shared (₹)','Status']];
+  const ordersAoa=[['Date','Vendor','Items','Total (₹)','Delivery (₹)','Taxes (₹)','Savings (₹)','Personal (₹)','Shared (₹)','Status']];
   const itemsAoa=[['Date','Vendor','Item','Qty','Category','Tag','Price (₹)']];
   const cat={}, ven={};
-  rs.forEach(r=>{ let p=0,s=0; (r.items||[]).forEach(it=>{ const pr=Number(it.price)||0;
+  rs.forEach(r=>{ let p=0,s=0,itemSum=0; (r.items||[]).forEach(it=>{ const pr=Number(it.price)||0; itemSum+=pr;
       itemsAoa.push([dstr(r),r.vendor||'',it.name||'',it.qty||1,it.category||'',it.tag||'',pr]);
       if(it.tag==='personal') p+=pr; else if(it.tag==='shared') s+=pr;
       cat[it.category||'General']=(cat[it.category||'General']||0)+pr; });
-    const v=r.vendor||'Other'; (ven[v]=ven[v]||{sum:0,c:0}); ven[v].sum+=Number(r.total)||0; ven[v].c++;
-    ordersAoa.push([dstr(r),r.vendor||'',(r.items||[]).length,Number(r.total)||0,p,s,r.status]); });
+    const v=r.vendor||'Other'; (ven[v]=ven[v]||{sum:0,c:0}); ven[v].sum+=itemSum; ven[v].c++;
+    const rec=orderReconciles(r), f=r.fees||{};   // only export fee numbers we trust (reconciled orders)
+    const dlv=rec?(Number(f.delivery)||0):'', tx=rec?(Number(r.tax)||0):'', sv=rec?(Number(f.discount)||0):'';
+    ordersAoa.push([dstr(r),r.vendor||'',(r.items||[]).length,Number(r.total)||0,dlv,tx,sv,p,s,r.status]); });
   const catAoa=[['Category','Spend (₹)'],...Object.entries(cat).sort((a,b)=>b[1]-a[1])];
-  const venAoa=[['Vendor','Orders','Total (₹)'],...Object.entries(ven).sort((a,b)=>b[1].sum-a[1].sum).map(([v,o])=>[v,o.c,o.sum])];
+  const venAoa=[['Vendor','Orders','Items (₹)'],...Object.entries(ven).sort((a,b)=>b[1].sum-a[1].sum).map(([v,o])=>[v,o.c,o.sum])];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ordersAoa), 'Orders');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(itemsAoa), 'Items');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(catAoa), 'By category');

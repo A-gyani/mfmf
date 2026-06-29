@@ -125,10 +125,15 @@ writes `inbox` docs + a placeholder `receipt`; the engine consumes `inbox` and f
     orderDate,          // ms epoch (number)  — normalize Firestore Timestamps with toMs()
     createdAt,          // ms epoch or serverTimestamp
     screenshots,        // count
-    fees:{delivery,handling,tip,discount},
+    fees:{delivery,handling,packaging,tip,discount},
+    tax,                // GST/taxes total (number) — reliably read from PDF invoices
+    source,             // 'pdf' | 'screenshot' | 'manual' — drives charge-reconciliation trust
     items:[ {id, name, qty, unit, price, category, tag} ],  // tag: 'personal'|'shared'|null
     manual:true|undefined }
   ```
+  An order **reconciles** when `Σitems + delivery + handling + packaging + tip + tax − discount ≈ total`
+  (exact for PDFs). Insights/Export only trust the itemised charges/tax when an order reconciles;
+  otherwise the unexplained gap is shown as "Other charges" / left out of settle-up.
   `status` ∈ `pending` → `analyzing` → `ready` → `tagged`; plus `duplicate` (a dismissible
   "already analyzed" notice). Manual entries skip straight to `ready`/`tagged`.
 - `inbox/{autoId}` — transient, one **per file** (screenshot **or** invoice PDF): `{ uid, batchId,
@@ -187,12 +192,16 @@ values added this session). Constants: `VENDORS`, `VENDOR_COLOR`, `CATS`.
   `renderAddVendors`/`renderManVendors`, `catOptions`.
 - **Insights:** `renderInsights` (period chips, stat cards, by-category bars, by-vendor rows,
   `monthlyTrend` stacked bars, most-bought). Pure CSS/SVG, no chart lib. **Reconciles:** headline
-  Total = `receipt.total` (tax-inclusive) while breakdowns sum `item.price`; a **bridge line**
-  shows `Items + taxes & charges = Total` (taxes = total − items — there is **no tax field**, q-comm
-  taxes live only inside `total`), the split bar has an **untagged** (gray) slice, and most-bought
-  collapses cosmetic name variants via `canonName` (e.g. the three "Gold Flake…" spellings → 1 row).
+  Total = `receipt.total` while breakdowns sum `item.price`; a **"Charges & taxes" panel**
+  (`chargesPanel`/`chargeAgg`/`orderReconciles`) decomposes the gap into **Delivery · Taxes (GST) ·
+  Handling · Tip · Savings · Other charges**, trusting the itemised numbers only for reconciled
+  orders (PDFs) and bucketing the rest as "Other charges" (with a nudge to add PDFs). Split bar has an
+  **untagged** (gray) slice; most-bought collapses name variants via `canonName`.
 - **Export:** `renderExport`, `ensureXLSX` (lazy-load SheetJS), `exportExcel(mode)` (`full` =
-  5-sheet workbook; `shared` = shared-items-only for the flatmate), `fname`.
+  5-sheet workbook; `shared` = shared-items-only for the flatmate), `fname`. Orders sheet has
+  Delivery/Taxes/Savings columns (blank for un-reconciled orders); By-vendor is item-based (matches
+  the app); the Shared sheet apportions each reconciled order's net delivery+taxes to the shared
+  items' share of the bill (`sharedChargeShare`) and adds it to the shared total.
 - **Sync bridge (`window.__*`):** the plain script defines `__onAuth`, `__applyRemoteReceipts`,
   `__setSyncStatus`, `saveReceipt`, `flushQueue`, `pushLocalReceipts`; the **module script**
   defines `signInGoogle`, `signOutMfmf`, `__uploadPending`, `__uploadReceiptDoc`,
@@ -345,9 +354,10 @@ Each run appends to `automation/analyze.log`.
   laptop + owner's Claude Max plan**: other users' files are analyzed on your machine/quota, only while
   it's on, and the **admin service account can read everyone's data**. So it's OK for a few trusted
   people, not a public/multi-tenant app. A proper per-user/cloud engine (or the household ledger) is v2.
-- **No tax field.** `fees` only holds delivery/handling/tip/discount; GST/packaging "Taxes & Charges"
-  exist only inside `total`. Insights surfaces the gap as a "taxes & charges" bridge line. **Invoice PDFs
-  capture taxes/items/order-id most accurately** — prefer them over screenshots when available.
+- **Taxes/charges fidelity follows the source.** Receipts now carry `tax` + `fees.packaging` and a
+  `source`; charges are broken out (Delivery/Taxes/Handling/Savings) only when an order **reconciles**
+  (exact for PDFs), else bucketed as "Other charges" and left out of settle-up. **Invoice PDFs capture
+  taxes/items/order-id exactly** — prefer them over screenshots, which the model reads less reliably.
 - **Not signed in / offline:** the app is local-first (manual entry, tagging, Insights, export all work
   on `localStorage`), but screenshot/PDF **analysis needs sign-in** (files queue locally and only upload
   to `inbox` on sign-in, then analyze on the next engine run).
