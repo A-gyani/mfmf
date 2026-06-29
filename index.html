@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#bfdcf0" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="apple-touch-icon" href="speed-rupee-logo.svg" />
   <title>MF, MF!</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -43,6 +43,8 @@
     .heroTop{display:flex; align-items:center; justify-content:space-between}
     .brand{font-family:'Roboto Serif',serif; font-size:23px; font-weight:600; color:#194a74; letter-spacing:-.3px;
       text-shadow:0 1px 6px rgba(255,255,255,.6)}
+    .brandLock{display:flex; align-items:center; gap:10px}
+    .brandLogo{width:36px; height:36px; border-radius:10px; box-shadow:0 2px 8px rgba(20,50,90,.18); display:block}
     .avatar{width:38px; height:38px; border-radius:50%; background:rgba(255,255,255,.75); color:var(--primary);
       display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:700; box-shadow:0 2px 8px rgba(20,50,90,.14)}
 
@@ -142,6 +144,8 @@
     .chips{display:flex; gap:8px; flex-wrap:wrap}
     .chip{border:1px solid var(--outline); background:var(--surface); color:var(--text); font-size:13px; font-weight:600; border-radius:var(--pill); padding:9px 15px}
     .chip.on{background:var(--primary); border-color:var(--primary); color:#fff}
+    .chip.chipAdd{border-style:dashed; color:var(--primary); display:inline-flex; align-items:center; gap:4px}
+    .chip.chipAdd .msr{font-size:15px}
 
     input,select{width:100%; background:var(--surface-2); border:1px solid var(--outline); color:var(--text);
       padding:13px; border-radius:13px; font-size:15px; font-family:inherit}
@@ -232,7 +236,10 @@
   <!-- ===================== HOME ===================== -->
   <section id="home" class="screen">
     <div class="hero">
-      <div class="heroTop"><span class="brand">MF, MF!</span><span class="avatar" id="avatar">·</span></div>
+      <div class="heroTop">
+        <div class="brandLock"><img src="speed-rupee-logo.svg" class="brandLogo" alt="" /><span class="brand">MF, MF!</span></div>
+        <span class="avatar" id="avatar">·</span>
+      </div>
     </div>
     <div class="balanceCard">
       <div class="bLbl">This month</div>
@@ -356,6 +363,10 @@ const VENDOR_COLOR={
   'Other':['#e3eaf3','#37485a'], 'Auto-detect':['#e3eaf3','#37485a']
 };
 const CATS=['General','Fruits & Veg','Dairy & Bread','Snacks','Beverages','Household','Personal Care','Cooking','Meat & Eggs','Sweets','Other'];
+let extraVendors=[], extraCats=[];   // custom values added this session (saved ones come back via receipts)
+function allVendors(){ const s=new Set([...VENDORS.filter(v=>v!=='Auto-detect'), ...extraVendors]); state.receipts.forEach(r=>{ const v=r.vendor; if(v && v!=='Auto-detect' && v!=='Multiple') s.add(v); }); return [...s]; }
+function allCats(){ const s=new Set([...CATS, ...extraCats]); state.receipts.forEach(r=>(r.items||[]).forEach(it=>{ if(it.category) s.add(it.category); })); return [...s]; }
+function catOptions(selected){ return allCats().map(c=>`<option ${c===selected?'selected':''}>${esc(c)}</option>`).join('')+`<option value="__add__">+ Add category…</option>`; }
 
 function load(){ try{ const d=JSON.parse(localStorage.getItem(KEY))||{}; return {receipts:d.receipts||[], settings:d.settings||{}}; }catch(e){ return {receipts:[],settings:{}}; } }
 function saveLocal(){ localStorage.setItem(KEY, JSON.stringify(state)); }
@@ -448,7 +459,7 @@ function renderHome(){
   }).join('')) : '';
 
   const list=document.getElementById('recentList');
-  const rs=state.receipts.filter(r=>r.status!=='duplicate').sort((a,b)=>toMs(b.createdAt)-toMs(a.createdAt)).slice(0,12);
+  const rs=state.receipts.filter(r=>r.status!=='duplicate').sort((a,b)=>toMs(b.createdAt)-toMs(a.createdAt)).slice(0,5);
   list.innerHTML = rs.length ? rs.map(orderCardHTML).join('')
     : `<div class="empty"><div class="ic"><span class="msr">receipt_long</span></div><div class="t">No orders yet</div><div class="s">Tap Add to scan a Blinkit or Zepto screenshot — or enter one by hand.</div></div>`;
   renderSyncRow();
@@ -530,13 +541,24 @@ function tagAll(rid, tag){
 let draftImages=[], draftVendor='Auto-detect';
 function openAdd(){ draftImages=[]; draftVendor='Auto-detect';
   document.getElementById('thumbs').innerHTML=''; document.getElementById('file').value='';
-  window.__pickAdd=v=>{ draftVendor=v; renderChips('vendorChips',VENDORS,draftVendor,window.__pickAdd); };
-  renderChips('vendorChips', VENDORS, draftVendor, window.__pickAdd);
+  renderAddVendors();
   updateSend(); go('add'); }
-function renderChips(containerId, list, sel, onPick){
+function renderChips(containerId, list, sel, onPick, onAdd){
   const el=document.getElementById(containerId);
-  el.innerHTML=list.map((v,i)=>`<button class="chip ${v===sel?'on':''}" data-i="${i}">${esc(v)}</button>`).join('');
-  el.onclick=e=>{ const b=e.target.closest('.chip'); if(!b) return; onPick(list[+b.dataset.i]); };
+  let html=list.map((v,i)=>`<button class="chip ${v===sel?'on':''}" data-i="${i}">${esc(v)}</button>`).join('');
+  if(onAdd) html+=`<button class="chip chipAdd" data-add="1"><span class="msr">add</span>New</button>`;
+  el.innerHTML=html;
+  el.onclick=e=>{ const b=e.target.closest('.chip'); if(!b) return; if(b.dataset.add){ onAdd(); return; } onPick(list[+b.dataset.i]); };
+}
+function renderAddVendors(){
+  renderChips('vendorChips', ['Auto-detect', ...allVendors()], draftVendor,
+    v=>{ draftVendor=v; renderAddVendors(); },
+    ()=>{ const n=(prompt('New vendor name')||'').trim(); if(n){ if(!extraVendors.includes(n)) extraVendors.push(n); draftVendor=n; } renderAddVendors(); });
+}
+function renderManVendors(){
+  renderChips('mVendorChips', allVendors(), mVendor,
+    v=>{ mVendor=v; renderManVendors(); },
+    ()=>{ const n=(prompt('New vendor name')||'').trim(); if(n){ if(!extraVendors.includes(n)) extraVendors.push(n); mVendor=n; } renderManVendors(); });
 }
 async function onFiles(files){
   for(const f of files){ if(!f.type.startsWith('image/')) continue; try{ draftImages.push(await compress(f)); }catch(e){ toast('Could not read that image'); } }
@@ -564,7 +586,7 @@ function submitOrder(){
 
 /* ============================ MANUAL / EDIT ============================ */
 let mVendor='Other';
-function setManVendor(v){ mVendor=v; renderChips('mVendorChips', VENDORS.filter(x=>x!=='Auto-detect'), mVendor, setManVendor); }
+function setManVendor(v){ mVendor=v; renderManVendors(); }
 function openManual(){
   editingId=null; manualReturn='add';
   document.getElementById('manualTitle').textContent='Enter manually';
@@ -594,7 +616,7 @@ function addItemRow(name='', price='', category='General', tag='personal'){
   wrap.innerHTML=`<input class="iName" placeholder="Item name" value="${esc(name)}" oninput="recalcTotal()" />
     <div class="itemRow2">
       <div class="amtWrap"><span class="cur">₹</span><input class="iAmt" type="number" inputmode="decimal" placeholder="0" value="${amt}" oninput="recalcTotal()" /></div>
-      <select class="catSel">${CATS.map(c=>`<option ${c===category?'selected':''}>${c}</option>`).join('')}</select>
+      <select class="catSel" data-prev="${esc(category)}" onchange="catChanged(this)">${catOptions(category)}</select>
       <button class="delItem" onclick="this.closest('.itemCard').remove(); recalcTotal()"><span class="msr">delete</span></button>
     </div>
     <div class="seg">
@@ -608,10 +630,18 @@ function setRowTag(btn, tag){
   card.querySelectorAll('.seg button').forEach(b=>b.classList.toggle('on', b.dataset.tag===tag));
 }
 function recalcTotal(){ let t=0; document.querySelectorAll('#mItems .iAmt').forEach(i=>t+=Number(i.value)||0); document.getElementById('mTotal').textContent=inr(t); }
+function catChanged(sel){
+  if(sel.value==='__add__'){
+    const n=(prompt('New category')||'').trim();
+    if(n && !extraCats.includes(n)) extraCats.push(n);
+    document.querySelectorAll('#mItems .catSel').forEach(s=>{ const v=(s===sel)?(n||s.dataset.prev||'General'):s.value; s.innerHTML=catOptions(v); s.dataset.prev=v; });
+  } else { sel.dataset.prev=sel.value; }
+}
 function saveManual(){
   const rows=[...document.querySelectorAll('#mItems .itemCard')];
-  const items=rows.map(r=>({ id:uid(), name:r.querySelector('.iName').value.trim(),
-    qty:1, price:Number(r.querySelector('.iAmt').value)||0, category:r.querySelector('.catSel').value, tag:r.dataset.tag||'personal' }))
+  const items=rows.map(r=>{ const cs=r.querySelector('.catSel').value;
+    return { id:uid(), name:r.querySelector('.iName').value.trim(),
+      qty:1, price:Number(r.querySelector('.iAmt').value)||0, category:(cs&&cs!=='__add__')?cs:'General', tag:r.dataset.tag||'personal' }; })
     .filter(it=>it.name && it.price>0);
   if(!items.length){ toast('Add at least one item with a price'); return; }
   const total=items.reduce((s,it)=>s+it.price,0);

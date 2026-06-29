@@ -9,6 +9,6 @@
   "background_color": "#eef4fb",
   "theme_color": "#2c5e8f",
   "icons": [
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "speed-rupee-logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
   ]
 }
