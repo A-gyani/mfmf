@@ -37,10 +37,11 @@ The phone alone cannot analyze.
 ## 2. Status
 
 **Feature-complete v1, deployed and in use.** Live at **https://a-gyani.github.io/mfmf/**
-(repo `https://github.com/A-gyani/mfmf`). Done: capture (screenshot **or** manual), vision
-analysis with **auto-grouping** + **duplicate detection**, tagging (per-item + bulk), Orders
-(sort/filter/edit/delete), Insights, Excel export, Firebase sync, PWA install, 15-min
-auto-analyze Scheduled Task. SW cache is at **`mfmf-v11`** (bump it on every deploy — see §10).
+(repo `https://github.com/A-gyani/mfmf`). Done: capture (screenshot, **invoice PDF**, **or**
+manual), vision analysis with **group-then-extract** + **robust duplicate detection**, tagging
+(per-item + bulk), Orders (sort/filter/edit/delete), Insights (tax-reconciled), Excel export,
+Firebase sync, PWA install, 15-min auto-analyze Scheduled Task. SW cache is at **`mfmf-v14`**
+(bump it on every deploy — see §10).
 
 ---
 
@@ -130,8 +131,9 @@ writes `inbox` docs + a placeholder `receipt`; the engine consumes `inbox` and f
   ```
   `status` ∈ `pending` → `analyzing` → `ready` → `tagged`; plus `duplicate` (a dismissible
   "already analyzed" notice). Manual entries skip straight to `ready`/`tagged`.
-- `inbox/{autoId}` — transient, one **per screenshot**: `{ uid, batchId, idx, vendor, image
-  (base64 dataURL), status:'pending', createdAt }`. Deleted by the engine after analysis.
+- `inbox/{autoId}` — transient, one **per file** (screenshot **or** invoice PDF): `{ uid, batchId,
+  idx, vendor, image (base64 dataURL — JPEG or `application/pdf`), status:'pending', createdAt }`.
+  Deleted by the engine after analysis.
 - `users/{uid}` parent doc has **no fields** (only the subcollection) — so a top-level
   `collection('users').get()` returns 0 docs; **use `collectionGroup('receipts')`** to scan.
 
@@ -172,8 +174,10 @@ values added this session). Constants: `VENDORS`, `VENDOR_COLOR`, `CATS`.
 - **Orders:** `renderOrders()` — all orders, sort (`oSort`) + filter (`oVendor`,`oMonth`); cards open the editor.
 - **Tag:** `renderTag()` — `ready` orders as cards with per-item `.seg` Personal/Shared toggles
   (`tagItem`) + bulk `tagAll`; an order flips to `tagged` (and leaves the queue) when all items tagged.
-- **Add (screenshot):** `openAdd`, `onFiles`/`compress` (canvas-resize to JPEG dataURL, kept
-  < ~780 KB so each fits Firestore's 1 MB doc cap), `submitOrder` (queues + uploads).
+- **Add (screenshot or PDF):** `openAdd`, `onFiles` (images → `compress` canvas-resize to JPEG
+  dataURL < ~780 KB; **PDFs → `readDataURL`** as-is, capped ~700 KB / 950 000 chars for the 1 MB
+  doc limit), `renderThumbs` (image thumb or a PDF placeholder), `submitOrder` (queues + uploads).
+  Each file becomes one `inbox` doc; the dataURL's `data:` prefix tells the engine PDF vs image.
 - **Manual / editor:** `openManual` (new), `editOrder(id)` (loads an existing order into the
   same form), `addItemRow` (name / **qty `×`** / ₹ line-total / category / tag — preserves `qty`
   and `unit`; never hardcode qty), `setRowTag`, `recalcTotal`, `catChanged`
@@ -182,7 +186,11 @@ values added this session). Constants: `VENDORS`, `VENDOR_COLOR`, `CATS`.
   already used in receipts + `extraVendors/extraCats`; `renderChips` (with a "+ New" chip),
   `renderAddVendors`/`renderManVendors`, `catOptions`.
 - **Insights:** `renderInsights` (period chips, stat cards, by-category bars, by-vendor rows,
-  `monthlyTrend` stacked bars, most-bought). Pure CSS/SVG, no chart lib.
+  `monthlyTrend` stacked bars, most-bought). Pure CSS/SVG, no chart lib. **Reconciles:** headline
+  Total = `receipt.total` (tax-inclusive) while breakdowns sum `item.price`; a **bridge line**
+  shows `Items + taxes & charges = Total` (taxes = total − items — there is **no tax field**, q-comm
+  taxes live only inside `total`), the split bar has an **untagged** (gray) slice, and most-bought
+  collapses cosmetic name variants via `canonName` (e.g. the three "Gold Flake…" spellings → 1 row).
 - **Export:** `renderExport`, `ensureXLSX` (lazy-load SheetJS), `exportExcel(mode)` (`full` =
   5-sheet workbook; `shared` = shared-items-only for the flatmate), `fname`.
 - **Sync bridge (`window.__*`):** the plain script defines `__onAuth`, `__applyRemoteReceipts`,
@@ -204,17 +212,25 @@ Runs on the laptop, on the Max plan ($0). Files: `analyze.js` (the engine), `che
 `add-domain.js` (authorize a domain for Firebase sign-in via the service account), `package.json`.
 
 **`analyze.js` flow:**
-1. Read `inbox` where `status=='pending'`; **group by `batchId`** (one batch = one "Add").
-2. For each batch: write the images to `_work/`, set the placeholder receipt to `analyzing`,
-   then call `claude -p --allowedTools Read --model sonnet` with **all** the batch's images and a
-   prompt that asks Claude to (a) **group** screenshots into distinct orders — same vendor + same
-   bill = one order; different vendor/bill = separate — and (b) extract each order
-   (`vendor, orderId, orderDate, items[], fees, total`).
-3. **Dedup:** compute an `orderSig` per detected order = printed `orderId` if present, else
-   `vendor|date|total|sorted-items`. Compare against existing `ready/tagged` receipts. New orders
-   are created (first reuses the placeholder, extras become new docs); a batch that's **entirely**
-   duplicates becomes one `status:'duplicate'` notice instead of duplicate orders.
-4. Delete the batch's `inbox` images. On failure, revert the placeholder to `pending` (retries next run).
+1. Read `inbox` where `status=='pending'`; **group by `uid`+`batchId`** (one batch = one "Add"). The
+   engine reads the **whole** `inbox` (all users), so it processes any signed-in user's files — see §14.
+2. For each batch: decode each `inbox` file to `_work/` — a `data:application/pdf` dataURL → `*.pdf`,
+   else `*.jpg` (Claude's Read tool reads PDFs natively). Set the placeholder to `analyzing`.
+3. **GROUP-THEN-EXTRACT** (replaced the old fixed-size image chunking, which split an order straddling
+   a chunk edge into partial/0-item duplicate fragments). A small batch (≤`CHUNK`=6 files) → one
+   combined group+extract `claude -p --allowedTools Read --model sonnet` call. A large batch → one
+   **light grouping pass** over ALL files (decides order boundaries with full context, `buildGroupPrompt`),
+   then each detected order is extracted from **only its own files** (`buildPrompt`) — so no order is
+   ever split across calls. Extraction returns `vendor, orderId, orderDate, items[], fees, total`;
+   the category enum is **dynamic** (`loadCats` = base `CATS` ∪ categories used in your receipts).
+   **0-item "orders" are dropped.**
+4. **Dedup** (`idKey`/`contentKey`/`isDup`/`remember`, was `orderSig`): a printed `orderId` keys
+   **vendor-agnostically** (`id|<orderid>`); the content key is **date + sorted item prices** (robust
+   to vendor mis-reads, item-name variance, and tax-shifted totals); an order WITH an id also matches
+   a manual/legacy copy WITHOUT one. Compared against existing `ready/tagged` receipts (per uid). New
+   orders are created (first reuses the placeholder, extras become new docs); a batch that's **entirely**
+   duplicates becomes one `status:'duplicate'` notice; skipped dups are logged.
+5. Delete the batch's `inbox` files. On failure, revert the placeholder to `pending` (retries next run).
 
 **Run it:** `node automation/check.js` (verify wiring, free) · `node automation/analyze.js`
 ("Analyze now") · or the Scheduled Task (§11).
@@ -301,8 +317,8 @@ Each run appends to `automation/analyze.log`.
 | You want to… | Edit |
 |---|---|
 | Add/rename a **vendor** or its chip colour | `VENDORS` + `VENDOR_COLOR` in `index.html` (users can also add custom vendors at runtime via "+ New"). |
-| Add/rename a **category** | `CATS` in `index.html`. |
-| Change the **vision extraction / grouping / dedup** | `buildPrompt()` and the main loop in `automation/analyze.js`; signature logic = `orderSig()`. |
+| Add/rename a **category** | `CATS` in **both** `index.html` and `automation/analyze.js`. (Custom categories you add at runtime auto-flow to the engine via `loadCats`.) |
+| Change the **vision extraction / grouping / dedup** | `buildPrompt()`/`buildGroupPrompt()` and the main loop in `automation/analyze.js`; dedup keys = `idKey()`/`contentKey()`/`isDup()`/`remember()`. |
 | Change a **screen's layout/content** | the matching `render*()` function + that screen's `<section>` markup + CSS. |
 | Change **tagging** behaviour | `tagItem`/`tagAll` (Tag screen) and `setRowTag`/`saveManual` (editor). |
 | Change **Insights** metrics/charts | `renderInsights` + `monthlyTrend`. |
@@ -321,7 +337,19 @@ Each run appends to `automation/analyze.log`.
 - **Shared = label-only** by design (no 50/50 split / "who owes whom" math — the Excel "Shared
   items" sheet is the settle-up artifact).
 - Notifications are an **in-app badge** ("N ready to tag"), not real push (FCM web-push is a v2 idea).
-- **Single-user.** A flatmate "household" shared ledger (both log in, shared items post to a common
-  space) is the main v2 direction.
-- Dedup fallback (no printed order id) keys on `vendor+date+total+items`, so two genuinely
-  identical orders could be flagged as one — rare; loosen `orderSig()` if it bites.
+- **Single-user by design — sharing is possible but not safe for strangers.** Firestore rules isolate
+  each Google account's data (`users/{uid}/**` owner-only), so others who sign in can't see your
+  receipts and vice-versa. BUT the engine reads the **whole shared `inbox`** and runs on the **owner's
+  laptop + owner's Claude Max plan**: other users' files are analyzed on your machine/quota, only while
+  it's on, and the **admin service account can read everyone's data**. So it's OK for a few trusted
+  people, not a public/multi-tenant app. A proper per-user/cloud engine (or the household ledger) is v2.
+- **No tax field.** `fees` only holds delivery/handling/tip/discount; GST/packaging "Taxes & Charges"
+  exist only inside `total`. Insights surfaces the gap as a "taxes & charges" bridge line. **Invoice PDFs
+  capture taxes/items/order-id most accurately** — prefer them over screenshots when available.
+- **Not signed in / offline:** the app is local-first (manual entry, tagging, Insights, export all work
+  on `localStorage`), but screenshot/PDF **analysis needs sign-in** (files queue locally and only upload
+  to `inbox` on sign-in, then analyze on the next engine run).
+- Dedup content fallback (no printed order id) keys on `date + sorted item prices`, so two genuinely
+  identical-priced orders on the same day could be flagged as one — rare; loosen `contentKey()` if it bites.
+- **Batch size:** uploading many large invoice PDFs at once can slow/timeout the single grouping/extract
+  Claude call — keep to ~5–6 files per "Add"; split larger sets into multiple batches.
