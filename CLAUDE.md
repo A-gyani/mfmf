@@ -238,9 +238,14 @@ Runs on the laptop, on the Max plan ($0). Files: `analyze.js` (the engine), `che
 4. **Dedup** (`idKey`/`contentKey`/`isDup`/`remember`, was `orderSig`): a printed `orderId` keys
    **vendor-agnostically** (`id|<orderid>`); the content key is **date + sorted item prices** (robust
    to vendor mis-reads, item-name variance, and tax-shifted totals); an order WITH an id also matches
-   a manual/legacy copy WITHOUT one. Compared against existing `ready/tagged` receipts (per uid). New
-   orders are created (first reuses the placeholder, extras become new docs); a batch that's **entirely**
-   duplicates becomes one `status:'duplicate'` notice; skipped dups are logged.
+   a manual/legacy copy WITHOUT one. `loadSigs` returns `{seen, ref}` — `ref` maps each key → the
+   existing receipt so a match can be located. Each detected order is then either:
+   - **new** → created (first reuses the placeholder, extras become new docs);
+   - **upgrade** → a **PDF** that matches an existing **non-PDF** order (screenshot/manual): patch the
+     existing receipt's `total/fees/tax/source` with the PDF's exact numbers but **keep its items + your
+     tags + status** (no re-tagging). A batch that's all upgrades drops its placeholder (no new order);
+   - **duplicate** → skipped (logged); a batch that's **entirely** plain dups becomes one
+     `status:'duplicate'` notice.
 5. Delete the batch's `inbox` files. On failure, revert the placeholder to `pending` (retries next run).
 
 **Run it:** `node automation/check.js` (verify wiring, free) · `node automation/analyze.js`
