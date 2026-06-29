@@ -216,14 +216,16 @@ Runs on the laptop, on the Max plan ($0). Files: `analyze.js` (the engine), `che
    engine reads the **whole** `inbox` (all users), so it processes any signed-in user's files — see §14.
 2. For each batch: decode each `inbox` file to `_work/` — a `data:application/pdf` dataURL → `*.pdf`,
    else `*.jpg` (Claude's Read tool reads PDFs natively). Set the placeholder to `analyzing`.
-3. **GROUP-THEN-EXTRACT** (replaced the old fixed-size image chunking, which split an order straddling
-   a chunk edge into partial/0-item duplicate fragments). A small batch (≤`CHUNK`=6 files) → one
-   combined group+extract `claude -p --allowedTools Read --model sonnet` call. A large batch → one
-   **light grouping pass** over ALL files (decides order boundaries with full context, `buildGroupPrompt`),
-   then each detected order is extracted from **only its own files** (`buildPrompt`) — so no order is
-   ever split across calls. Extraction returns `vendor, orderId, orderDate, items[], fees, total`;
-   the category enum is **dynamic** (`loadCats` = base `CATS` ∪ categories used in your receipts).
-   **0-item "orders" are dropped.**
+3. Split the batch by kind, then extract (`claude -p --allowedTools Read --model sonnet`):
+   - **PDFs → one call each.** An invoice PDF is one complete order, so each is extracted on its own
+     (no grouping) — any number can be added at once with no big/timeout-prone call.
+   - **Screenshots → GROUP-THEN-EXTRACT** (replaced the old fixed-size chunking, which split an order
+     straddling a chunk edge into partial/0-item duplicate fragments). ≤`CHUNK`=6 screenshots → one
+     combined group+extract call; more → one **light grouping pass** over all screenshots
+     (`buildGroupPrompt`, decides order boundaries with full context), then each order extracted from
+     **only its own screenshots** (`buildPrompt`) — never split across calls.
+   Extraction returns `vendor, orderId, orderDate, items[], fees, total`; the category enum is
+   **dynamic** (`loadCats` = base `CATS` ∪ categories used in your receipts). **0-item "orders" are dropped.**
 4. **Dedup** (`idKey`/`contentKey`/`isDup`/`remember`, was `orderSig`): a printed `orderId` keys
    **vendor-agnostically** (`id|<orderid>`); the content key is **date + sorted item prices** (robust
    to vendor mis-reads, item-name variance, and tax-shifted totals); an order WITH an id also matches
@@ -351,5 +353,7 @@ Each run appends to `automation/analyze.log`.
   to `inbox` on sign-in, then analyze on the next engine run).
 - Dedup content fallback (no printed order id) keys on `date + sorted item prices`, so two genuinely
   identical-priced orders on the same day could be flagged as one — rare; loosen `contentKey()` if it bites.
-- **Batch size:** uploading many large invoice PDFs at once can slow/timeout the single grouping/extract
-  Claude call — keep to ~5–6 files per "Add"; split larger sets into multiple batches.
+- **Batch size:** invoice **PDFs are extracted one-per-call**, so you can add **any number** at once
+  (each PDF must be < ~700 KB; a big dump just makes one engine run take a few extra minutes — add a
+  per-run cap if that bites). Only *screenshots* are grouped; the heavy case is one order spanning many
+  screenshots.
