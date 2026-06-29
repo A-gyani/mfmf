@@ -712,13 +712,13 @@ function renderInsights(){
     (r.items||[]).forEach(it=>{ const p=Number(it.price)||0; ven[v].sum+=p;
       if(it.tag==='personal') personal+=p; else if(it.tag==='shared') shared+=p;
       cat[it.category||'General']=(cat[it.category||'General']||0)+p;
-      const nm=(it.name||'').trim(); if(nm) names[nm]=(names[nm]||0)+1; }); });
+      const nm=(it.name||'').trim(); if(nm){ const k=nm.toLowerCase(); (names[k]=names[k]||{label:nm,qty:0,spend:0,orders:0}); names[k].qty+=Number(it.qty)||1; names[k].spend+=p; names[k].orders++; } }); });
   const orders=rs.length, avg=orders?total/orders:0, denom=personal+shared;
   const catArr=Object.entries(cat).sort((a,b)=>b[1]-a[1]); const catMax=catArr.length?catArr[0][1]:1;
   const catBars=catArr.map(([c,v],i)=>`<div class="barRow"><div class="lab"><span>${esc(c)}</span><span class="amt">${inr(v)}</span></div><div class="track"><div class="fill" style="width:${Math.max(4,v/catMax*100)}%;background:${CAT_COLORS[i%CAT_COLORS.length]}"></div></div></div>`).join('');
   const venRows=Object.entries(ven).sort((a,b)=>b[1].sum-a[1].sum).map(([v,o])=>`<div class="vrow">${vendorAva(v)}<div class="info"><div class="nm">${esc(v)}</div><div class="sub">${o.count} ${o.count===1?'order':'orders'}</div></div><div class="amt">${inr(o.sum)}</div></div>`).join('');
-  const top=Object.entries(names).filter(([,c])=>c>1).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  const topList=top.length?`<div class="sectionLabel">Most bought</div><div class="miList">${top.map(([n,c])=>`<div class="mi"><span>${esc(n)}</span><b>×${c}</b></div>`).join('')}</div>`:'';
+  const top=Object.values(names).filter(o=>o.qty>1).sort((a,b)=>b.qty-a.qty).slice(0,5);
+  const topList=top.length?`<div class="sectionLabel">Most bought</div><div class="miList">${top.map(o=>`<div class="mi"><span>${esc(o.label)}</span><span><b>×${o.qty}</b> <span style="color:var(--muted);font-weight:600">${inr(o.spend)}</span></span></div>`).join('')}</div>`:'';
   body.innerHTML = insightsControls()
     + `<div class="statGrid">
         <div class="statCard"><div class="k">Total spend</div><div class="v">${inr(total)}</div></div>
