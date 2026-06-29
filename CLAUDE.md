@@ -236,16 +236,19 @@ Runs on the laptop, on the Max plan ($0). Files: `analyze.js` (the engine), `che
    Extraction returns `vendor, orderId, orderDate, items[], fees, total`; the category enum is
    **dynamic** (`loadCats` = base `CATS` ∪ categories used in your receipts). **0-item "orders" are dropped.**
 4. **Dedup** (`idKey`/`contentKey`/`isDup`/`remember`, was `orderSig`): a printed `orderId` keys
-   **vendor-agnostically** (`id|<orderid>`); the content key is **date + sorted item prices** (robust
-   to vendor mis-reads, item-name variance, and tax-shifted totals); an order WITH an id also matches
-   a manual/legacy copy WITHOUT one. `loadSigs` returns `{seen, ref}` — `ref` maps each key → the
-   existing receipt so a match can be located. Each detected order is then either:
+   **vendor-agnostically**, and `idKey` **strips a trailing invoice-suffix letter** (`…12669A` → `…12669`)
+   because q-comm **tax-invoice numbers = the app order id + a sequence letter A/B**. The content key is
+   **date + sorted item prices**; an order WITH an id also matches a manual/legacy copy WITHOUT one.
+   `loadSigs` returns `{seen, ref}` — `ref` maps each key → the existing receipt (with its items). Each
+   detected order is then either:
    - **new** → created (first reuses the placeholder, extras become new docs);
-   - **upgrade** → a **PDF** that matches an existing **non-PDF** order (screenshot/manual): patch the
-     existing receipt's `total/fees/tax/source` with the PDF's exact numbers but **keep its items + your
-     tags + status** (no re-tagging). A batch that's all upgrades drops its placeholder (no new order);
+   - **upgrade** → a **PDF** matching an existing **non-PDF** order: **replace** it with the PDF's exact
+     **pre-tax items + tax + total** (q-comm PDFs itemise pre-tax prices + a GST line that reconciles
+     exactly; screenshots show tax-inclusive prices — so you can't just add the tax), **carrying your
+     tags across by item name** (`normName`). A batch that's all upgrades drops its placeholder;
    - **duplicate** → skipped (logged); a batch that's **entirely** plain dups becomes one
      `status:'duplicate'` notice.
+   Each vision call is retried a few times (`runExtract`) so one malformed response doesn't abort a batch.
 5. Delete the batch's `inbox` files. On failure, revert the placeholder to `pending` (retries next run).
 
 **Run it:** `node automation/check.js` (verify wiring, free) · `node automation/analyze.js`
@@ -306,6 +309,11 @@ hands-off while the laptop is on. Manage it:
 - Remove: `Unregister-ScheduledTask -TaskName "MF MF Analyze" -Confirm:$false`
 - Run now: `Start-ScheduledTask -TaskName "MF MF Analyze"`
 Each run appends to `automation/analyze.log`.
+
+**⚠ Don't run `node analyze.js` manually while the task is enabled.** Two engine instances on the same
+`inbox` race: one can write an order while the other's failure-path reverts the placeholder to
+`pending`, leaving a fully-extracted order stuck at `status:'pending'`. To run manually, `Disable` the
+task first (or just `Start-ScheduledTask` and read the log).
 
 ---
 
