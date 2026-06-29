@@ -831,7 +831,7 @@ if(NOT_SET){
     window.__uploadPending = async ({receiptId,vendor,images})=>{
       try{
         await setDoc(doc(db,'users',u.uid,'receipts',receiptId), { id:receiptId, vendor, status:'pending', screenshots:images.length, createdAt:serverTimestamp() }, {merge:true});
-        for(const image of images){ await addDoc(collection(db,'inbox'), { uid:u.uid, receiptId, vendor, image, status:'pending', createdAt:serverTimestamp() }); }
+        for(let i=0;i<images.length;i++){ await addDoc(collection(db,'inbox'), { uid:u.uid, batchId:receiptId, idx:i, vendor, image:images[i], status:'pending', createdAt:serverTimestamp() }); }
         return true;
       }catch(e){ console.warn('upload failed',e); return false; }
     };
