@@ -1,6 +1,6 @@
 // MF, MF! service worker — cache the shell, and auto-update so new deploys land
 // without the manual "clear the app" dance (same pattern as Charaivati).
-const CACHE = 'mfmf-v13';
+const CACHE = 'mfmf-v14';
 const CORE = ['./', './index.html', './manifest.webmanifest', './speed-rupee-logo.svg', './bg.jpg'];
 
 self.addEventListener('install', e => {

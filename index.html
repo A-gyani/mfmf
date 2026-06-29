@@ -56,7 +56,9 @@
     .bAmt{font-size:38px; font-weight:700; letter-spacing:-1px; line-height:1.08; margin-top:2px; color:#101b26}
     .splitBar{display:flex; height:9px; border-radius:99px; overflow:hidden; background:#e8eef6; margin:15px 0 13px}
     .splitBar .sp{height:100%; transition:width .5s cubic-bezier(.3,.7,.3,1)}
-    .splitBar .sp.pink{background:var(--pink)} .splitBar .sp.blue{background:var(--primary-bright)}
+    .splitBar .sp.pink{background:var(--pink)} .splitBar .sp.blue{background:var(--primary-bright)} .splitBar .sp.gray{background:#c2ccd6}
+    .reconLine{font-size:12.5px; color:var(--muted); font-weight:600; text-align:center; margin:10px 4px 0}
+    .reconLine b{color:var(--text); font-weight:700}
     .bStats{display:flex; gap:18px}
     .bStat{display:flex; align-items:center; gap:7px; font-size:13px; color:var(--muted); font-weight:500}
     .bStat b{color:var(--text); font-weight:700; font-size:14px}
@@ -138,6 +140,8 @@
     .thumbs{display:flex; gap:10px; flex-wrap:wrap; margin-top:14px}
     .thumb{position:relative; width:86px; height:112px; border-radius:14px; overflow:hidden; box-shadow:var(--shadow-card)}
     .thumb img{width:100%; height:100%; object-fit:cover}
+    .thumb .pdfThumb{width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; background:linear-gradient(150deg,#ffe3ea,#dfeafb); color:#b0436b; font-size:12px; font-weight:700}
+    .thumb .pdfThumb .msr{font-size:30px}
     .thumb .x{position:absolute; top:5px; right:5px; width:23px; height:23px; border-radius:50%; background:rgba(0,0,0,.55); color:#fff; display:flex; align-items:center; justify-content:center}
     .thumb .x .msr{font-size:15px}
 
@@ -305,10 +309,10 @@
     <div class="body">
       <div class="drop" onclick="document.getElementById('file').click()">
         <div class="ic"><span class="msr">add_a_photo</span></div>
-        <div class="t">Add order screenshots</div>
+        <div class="t">Add screenshots or invoice PDF</div>
         <div class="s">Blinkit, Zepto, Instamart…</div>
       </div>
-      <input id="file" type="file" accept="image/*" multiple class="hidden" onchange="onFiles(this.files)" />
+      <input id="file" type="file" accept="image/*,application/pdf" multiple class="hidden" onchange="onFiles(this.files)" />
       <div class="thumbs" id="thumbs"></div>
       <div class="fieldLabel">Vendor</div>
       <div class="chips" id="vendorChips"></div>
@@ -366,7 +370,7 @@ const VENDOR_COLOR={
   'Swiggy':['#ffe1cc','#8a3b10'], 'Zomato':['#fbd4de','#8a1338'], 'Dunzo':['#d3f0e9','#16463c'],
   'Other':['#e3eaf3','#37485a'], 'Auto-detect':['#e3eaf3','#37485a']
 };
-const CATS=['General','Fruits & Veg','Dairy & Bread','Snacks','Beverages','Household','Personal Care','Cooking','Meat & Eggs','Sweets','Other'];
+const CATS=['General','Fruits & Veg','Dairy & Bread','Snacks','Beverages','Household','Personal Care','Cooking','Meat & Eggs','Sweets','Cigarette','Other'];
 let extraVendors=[], extraCats=[];   // custom values added this session (saved ones come back via receipts)
 function allVendors(){ const s=new Set([...VENDORS.filter(v=>v!=='Auto-detect'), ...extraVendors]); state.receipts.forEach(r=>{ const v=r.vendor; if(v && v!=='Auto-detect' && v!=='Multiple') s.add(v); }); return [...s]; }
 function allCats(){ const s=new Set([...CATS, ...extraCats]); state.receipts.forEach(r=>(r.items||[]).forEach(it=>{ if(it.category) s.add(it.category); })); return [...s]; }
@@ -564,11 +568,24 @@ function renderManVendors(){
     v=>{ mVendor=v; renderManVendors(); },
     ()=>{ const n=(prompt('New vendor name')||'').trim(); if(n){ if(!extraVendors.includes(n)) extraVendors.push(n); mVendor=n; } renderManVendors(); });
 }
+function readDataURL(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file); }); }
 async function onFiles(files){
-  for(const f of files){ if(!f.type.startsWith('image/')) continue; try{ draftImages.push(await compress(f)); }catch(e){ toast('Could not read that image'); } }
+  for(const f of files){
+    try{
+      if(f.type==='application/pdf' || /\.pdf$/i.test(f.name)){
+        const data=await readDataURL(f);                       // PDFs aren't downscalable; keep under Firestore's 1 MB doc cap
+        if(data.length>950000){ toast('PDF too large — under ~700 KB please'); continue; }
+        draftImages.push(data);
+      } else if(f.type.startsWith('image/')){
+        draftImages.push(await compress(f));
+      }
+    }catch(e){ toast('Could not read that file'); }
+  }
   renderThumbs(); updateSend();
 }
-function renderThumbs(){ document.getElementById('thumbs').innerHTML=draftImages.map((d,i)=>`<div class="thumb"><img src="${d}"/><button class="x" onclick="rmThumb(${i})"><span class="msr">close</span></button></div>`).join(''); }
+function renderThumbs(){ document.getElementById('thumbs').innerHTML=draftImages.map((d,i)=>{
+  const inner=d.startsWith('data:application/pdf')?`<div class="pdfThumb"><span class="msr">picture_as_pdf</span>PDF</div>`:`<img src="${d}"/>`;
+  return `<div class="thumb">${inner}<button class="x" onclick="rmThumb(${i})"><span class="msr">close</span></button></div>`; }).join(''); }
 function rmThumb(i){ draftImages.splice(i,1); renderThumbs(); updateSend(); }
 function updateSend(){ document.getElementById('sendBtn').disabled=draftImages.length===0; }
 function compress(file){
@@ -708,17 +725,21 @@ function monthlyTrend(){
       <div class="tv">${a.t?inr(a.t):'·'}</div><div class="tl">${monthLabel(k).split(' ')[0]}</div></div>`; }).join('');
   return `<div class="trend">${cols}</div>`;
 }
+// collapse cosmetic name variants so "Most bought" counts a product once
+// (e.g. "Gold Flake Indie Mint", "…Cigarette", "…- 10 Sticks" → one row)
+function canonName(s){ return String(s||'').toLowerCase().split(' - ')[0].replace(/\bcigarettes?\b/g,'').replace(/[^a-z0-9]+/g,' ').trim(); }
 function renderInsights(){
   const body=document.getElementById('insightsBody');
   const rs=periodReceipts();
   if(!rs.length){ body.innerHTML=insightsControls()+`<div class="empty"><div class="ic"><span class="msr">bar_chart</span></div><div class="t">No spending here</div><div class="s">No tagged or analyzed orders in this period.</div></div>`; return; }
-  let total=0, personal=0, shared=0; const cat={}, ven={}, names={};
+  let total=0, personal=0, shared=0, untagged=0; const cat={}, ven={}, names={};
   rs.forEach(r=>{ total+=Number(r.total)||0; const v=r.vendor||'Other'; (ven[v]=ven[v]||{sum:0,count:0}).count++;
     (r.items||[]).forEach(it=>{ const p=Number(it.price)||0; ven[v].sum+=p;
-      if(it.tag==='personal') personal+=p; else if(it.tag==='shared') shared+=p;
+      if(it.tag==='personal') personal+=p; else if(it.tag==='shared') shared+=p; else untagged+=p;
       cat[it.category||'General']=(cat[it.category||'General']||0)+p;
-      const nm=(it.name||'').trim(); if(nm){ const k=nm.toLowerCase(); (names[k]=names[k]||{label:nm,qty:0,spend:0,orders:0}); names[k].qty+=Number(it.qty)||1; names[k].spend+=p; names[k].orders++; } }); });
-  const orders=rs.length, avg=orders?total/orders:0, denom=personal+shared;
+      const nm=(it.name||'').trim(); if(nm){ const k=canonName(nm)||nm.toLowerCase(); if(!names[k]) names[k]={label:nm,qty:0,spend:0,orders:0}; else if(nm.length<names[k].label.length) names[k].label=nm; names[k].qty+=Number(it.qty)||1; names[k].spend+=p; names[k].orders++; } }); });
+  const orders=rs.length, avg=orders?total/orders:0;
+  const itemsTotal=personal+shared+untagged, taxes=Math.round((total-itemsTotal)*100)/100, denom=itemsTotal||1;
   const catArr=Object.entries(cat).sort((a,b)=>b[1]-a[1]); const catMax=catArr.length?catArr[0][1]:1;
   const catBars=catArr.map(([c,v],i)=>`<div class="barRow"><div class="lab"><span>${esc(c)}</span><span class="amt">${inr(v)}</span></div><div class="track"><div class="fill" style="width:${Math.max(4,v/catMax*100)}%;background:${CAT_COLORS[i%CAT_COLORS.length]}"></div></div></div>`).join('');
   const venRows=Object.entries(ven).sort((a,b)=>b[1].sum-a[1].sum).map(([v,o])=>`<div class="vrow">${vendorAva(v)}<div class="info"><div class="nm">${esc(v)}</div><div class="sub">${o.count} ${o.count===1?'order':'orders'}</div></div><div class="amt">${inr(o.sum)}</div></div>`).join('');
@@ -731,7 +752,8 @@ function renderInsights(){
         <div class="statCard"><div class="k">Avg order</div><div class="v">${inr(avg)}</div></div>
         <div class="statCard"><div class="k">Personal · Shared</div><div class="v" style="font-size:15px">${inr(personal)} · ${inr(shared)}</div></div>
       </div>`
-    + `<div class="sectionLabel">Personal vs shared</div><div class="splitBar" style="margin:0"><div class="sp pink" style="width:${denom?personal/denom*100:0}%"></div><div class="sp blue" style="width:${denom?shared/denom*100:0}%"></div></div>`
+    + `<div class="reconLine">Items <b>${inr(itemsTotal)}</b> + taxes &amp; charges <b>${inr(taxes)}</b> = total <b>${inr(total)}</b></div>`
+    + `<div class="sectionLabel">Personal vs shared</div><div class="splitBar" style="margin:0"><div class="sp pink" style="width:${personal/denom*100}%"></div><div class="sp blue" style="width:${shared/denom*100}%"></div><div class="sp gray" style="width:${untagged/denom*100}%"></div></div>`
     + `<div class="sectionLabel">By category</div>${catBars}`
     + `<div class="sectionLabel">By vendor</div>${venRows}`
     + `<div class="sectionLabel">Monthly trend</div>${monthlyTrend()}`
