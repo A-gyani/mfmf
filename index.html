@@ -924,6 +924,26 @@ function renderSyncRow(){ const el=document.getElementById('syncRow'); if(el) el
 
 renderHome();
 
+/* Share Target — files flung in from Android's share sheet (manifest → sw.js stashes them,
+   redirects here with ?shared=1). Pull them out of the cache and drop them into the Add flow. */
+async function consumeSharedFiles(){
+  if(new URLSearchParams(location.search).get('shared')!=='1') return;
+  history.replaceState(null,'',location.pathname);          // drop ?shared=1 so a refresh won't repeat
+  try{
+    const cache=await caches.open('mfmf-shared');
+    const files=[];
+    for(const k of await cache.keys()){
+      const res=await cache.match(k); if(!res) continue;
+      const blob=await res.blob();
+      const name=decodeURIComponent(res.headers.get('X-File-Name')||'shared');
+      files.push(new File([blob], name, {type:blob.type||res.headers.get('Content-Type')||''}));
+      await cache.delete(k);
+    }
+    if(files.length){ openAdd(); await onFiles(files); toast(files.length+(files.length>1?' files':' file')+' shared in — pick a vendor, then Send'); }
+  }catch(_){}
+}
+consumeSharedFiles();
+
 /* service worker register + auto-update */
 if('serviceWorker' in navigator){
   let refreshing=false; const had=!!navigator.serviceWorker.controller;

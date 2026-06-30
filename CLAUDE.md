@@ -40,8 +40,9 @@ The phone alone cannot analyze.
 (repo `https://github.com/A-gyani/mfmf`). Done: capture (screenshot, **invoice PDF**, **or**
 manual), vision analysis with **group-then-extract** + **robust duplicate detection**, tagging
 (per-item + bulk), Orders (sort/filter/edit/delete), Insights (tax-reconciled), Excel export,
-Firebase sync, PWA install, 15-min auto-analyze Scheduled Task. SW cache is at **`mfmf-v18`**
-(bump it on every deploy — see §10).
+Firebase sync, PWA install, 15-min auto-analyze Scheduled Task, **Share Target** (share a
+Blinkit/Zepto screenshot or invoice PDF straight into the app from Android's share sheet). SW
+cache is at **`mfmf-v19`** (bump it on every deploy — see §10).
 
 ---
 
@@ -194,6 +195,12 @@ values added this session). Constants: `VENDORS`, `VENDOR_COLOR`, `CATS`.
   dataURL < ~780 KB; **PDFs → `readDataURL`** as-is, capped ~700 KB / 950 000 chars for the 1 MB
   doc limit), `renderThumbs` (image thumb or a PDF placeholder), `submitOrder` (queues + uploads).
   Each file becomes one `inbox` doc; the dataURL's `data:` prefix tells the engine PDF vs image.
+- **Share Target (Android):** `manifest.webmanifest` declares a `share_target` (POST, multipart,
+  `files` ← `image/*`+`application/pdf`). Since Pages is static, **`sw.js` catches the POST** to
+  `./share-target`, stashes the file(s) in the `mfmf-shared` cache, and redirects to `./?shared=1`.
+  On boot, `consumeSharedFiles()` reads that cache and feeds the files into `openAdd()`+`onFiles()`,
+  so a shared screenshot lands in the Add screen ready to send. iOS/Safari has no Share Target →
+  it falls back to the normal upload flow there. (`mfmf-shared` is excluded from the SW activate sweep.)
 - **Manual / editor:** `openManual` (new), `editOrder(id)` (loads an existing order into the
   same form), `addItemRow` (name / **qty `×`** / ₹ line-total / category / tag — preserves `qty`
   and `unit`; never hardcode qty), `setRowTag`, `recalcTotal`, `catChanged`
@@ -246,12 +253,29 @@ Runs on the laptop, on the Max plan ($0). Files: `analyze.js` (the engine), `che
      **only its own screenshots** (`buildPrompt`) — never split across calls.
    Extraction returns `vendor, orderId, orderDate, items[], fees, total`; the category enum is
    **dynamic** (`loadCats` = base `CATS` ∪ categories used in your receipts). **0-item "orders" are dropped.**
-4. **Dedup** (`idKey`/`contentKey`/`isDup`/`remember`, was `orderSig`): a printed `orderId` keys
-   **vendor-agnostically**, and `idKey` **strips a trailing invoice-suffix letter** (`…12669A` → `…12669`)
-   because q-comm **tax-invoice numbers = the app order id + a sequence letter A/B**. The content key is
-   **date + sorted item prices**; an order WITH an id also matches a manual/legacy copy WITHOUT one.
-   `loadSigs` returns `{seen, ref}` — `ref` maps each key → the existing receipt (with its items). Each
-   detected order is then either:
+   **Concurrency (speed):** the vision calls are **async** (`runClaude` uses `spawn`, not `spawnSync`)
+   and run through `mapPool` at **`POOL`=4 in flight at once** — PDFs and screenshot-groups extract in
+   parallel (each call is independent; the dedup/write step stays serial after). This makes a large PDF
+   dump ~3–4× faster (measured ~3.6×). A **per-run file cap** (`RUN_FILE_CAP`=12) processes whole
+   batches up to ~12 files per run and defers the rest to the next run (a single bigger batch still runs
+   in full — batches are never split). First-attempt timeout is short (`T_FIRST`=90 s, then `T_RETRY`=5 min)
+   so a stalled call fails fast instead of blocking; on timeout the whole `cmd→claude` tree is `taskkill`ed
+   to avoid orphan processes. Token use is unchanged (same files = same calls, just overlapped in time).
+4. **Dedup** (`idKey`/`contentKey`/`isStrongCk`/`idShape`/`isDup`/`remember`, was `orderSig`): a printed
+   `orderId` keys **vendor-agnostically**, and `idKey` **strips a trailing invoice-suffix letter**
+   (`…12669A` → `…12669`) because for Zepto/Instamart the **tax-invoice number = the app order id + a
+   sequence letter A/B**. The content key is **date + sorted item prices**; an order WITH an id also
+   matches a manual/legacy copy WITHOUT one. **Blinkit is the exception that the suffix-strip can't fix:**
+   it prints **two unrelated ids** for one order — an **alpha app "Order ID" `ORD…`** on the in-app
+   screenshot but a **numeric tax-invoice number** on the PDF — so `idKey` never matches across the two
+   copies. To bridge them, a **STRONG content key** (`isStrongCk` = a real `YYYY-MM-DD` date **+** item
+   prices) is treated as a dedup match **even when both copies carry an id, but only if those ids are
+   different *shapes*** (`idShape`: numeric vs alphanumeric). Two ids of the **same** shape that differ
+   stay **distinct orders** — so same-priced same-day **repeat buys are preserved** (`_dedup_test.js`
+   cases 4 + 10). Without this, every Blinkit PDF whose model-read id differed from its screenshot copy
+   was created as a brand-new "ready" order (and the intended PDF→screenshot upgrade was skipped, since
+   the upgrade path only runs inside the `isDup` branch). `loadSigs` returns `{seen, ref}` — `ref` maps
+   each key → the existing receipt (with its items). Each detected order is then either:
    - **new** → created (first reuses the placeholder, extras become new docs);
    - **upgrade** → a **PDF** matching an existing **non-PDF** order: **replace** it with the PDF's exact
      **gross (paid) items + total** (each `price` = the invoice per-line "Total" incl. GST/cess, so items
@@ -264,6 +288,32 @@ Runs on the laptop, on the Max plan ($0). Files: `analyze.js` (the engine), `che
 
 **Run it:** `node automation/check.js` (verify wiring, free) · `node automation/analyze.js`
 ("Analyze now") · or the Scheduled Task (§11).
+
+### Diagnostic / backfill tooling (all READ-ONLY unless noted; no Claude; safe anytime — git-ignored `_*.js`)
+Built when diagnosing "app vs PDF" extraction fidelity (2026-06-30). Use these to *confirm* a
+mis-extraction objectively rather than by eye, and to repair past data:
+- **`_audit.js`** — dumps every receipt to `_work/_audit.json` and prints a **reconciliation check**:
+  for a PDF order `Σitems + tax + delivery + handling + packaging + tip − discount` must ≈ `total`.
+  A PDF order with `|delta|>₹1` is a provable extraction error. (Fast first pass; it can't catch a
+  wrong *name/qty/category* on an order that still adds up — for that, diff the PDF directly.)
+- **Direct PDF diff** — source PDFs sit in `_work/<inboxId>.pdf` **only between an analyze run and the
+  next cleanup** (transient!). `pdftotext -layout file.pdf -` (poppler, installed) extracts the text;
+  join to a receipt by the printed **Order Id** and compare line by line. Claude's Read tool also reads
+  PDFs natively. q-comm tax invoices print **Taxable Value** (pre-tax) AND a per-line **Total** (gross).
+- **`_backfill_gross.js`** — **WRITES** (dry-run by default; `--apply` to commit). Converts old pre-tax
+  PDF orders to gross: re-reads the per-line "Total" from a `_work` PDF when present, else handles the
+  easy exact cases (items already sum to total → just clear a spurious `tax`; single-item order → its
+  one line = total − fees). **Safety:** only writes an order if the new prices reconcile to its total
+  (±₹1). Multi-item mixed-rate orders with no PDF are skipped (can't split one tax across 5%/83% items).
+- **`_pretax_todo.js`** — lists PDF orders **still pre-tax** (marker: `source==='pdf' && tax>0`; the
+  new gross model stores `tax:0`). Cigarette orders flagged 🚬 (biggest gap). **To fix a listed order,
+  just re-add its invoice PDF** — the engine re-upgrades it to gross and carries tags (see §8 upgrade
+  rule: a re-added PDF upgrades an existing order when it's non-pdf **or** an old-model pdf with `tax>0`).
+
+> **Migration status (2026-06-30):** all NEW PDF adds are gross. A batch of *legacy* PDF orders remains
+> pre-tax (item prices understated by their tax — visible mainly on cigarettes, ~83% tax). They reconcile
+> fine and `total` is correct; only the per-item split is low. Clear them by re-adding the PDFs
+> (`_pretax_todo.js` tracks what's left); grocery-only ones are off by only ~5% and can be left.
 
 ---
 
@@ -378,16 +428,18 @@ task first (or just `Start-ScheduledTask` and read the log).
   laptop + owner's Claude Max plan**: other users' files are analyzed on your machine/quota, only while
   it's on, and the **admin service account can read everyone's data**. So it's OK for a few trusted
   people, not a public/multi-tenant app. A proper per-user/cloud engine (or the household ledger) is v2.
-- **Taxes/charges fidelity follows the source.** Receipts now carry `tax` + `fees.packaging` and a
-  `source`; charges are broken out (Delivery/Taxes/Handling/Savings) only when an order **reconciles**
-  (exact for PDFs), else bucketed as "Other charges" and left out of settle-up. **Invoice PDFs capture
-  taxes/items/order-id exactly** — prefer them over screenshots, which the model reads less reliably.
+- **Item prices are GROSS (what you paid, incl. tax)** — the invoice's per-line "Total", not the pre-tax
+  "Taxable Value" (see §6). PDF orders therefore store `tax:0` and carry the embedded GST in `taxIncl`
+  (shown as an "of which GST (incl.)" note). Charges (Delivery/Handling/Savings) are still broken out
+  only when an order **reconciles** (exact for PDFs), else bucketed as "Other charges". **Invoice PDFs
+  capture items/taxes/order-id exactly** — prefer them over screenshots, which the model reads less
+  reliably. *Legacy pre-tax orders remain until re-added — see §8 tooling (`_pretax_todo.js`).*
 - **Not signed in / offline:** the app is local-first (manual entry, tagging, Insights, export all work
   on `localStorage`), but screenshot/PDF **analysis needs sign-in** (files queue locally and only upload
   to `inbox` on sign-in, then analyze on the next engine run).
 - Dedup content fallback (no printed order id) keys on `date + sorted item prices`, so two genuinely
   identical-priced orders on the same day could be flagged as one — rare; loosen `contentKey()` if it bites.
-- **Batch size:** invoice **PDFs are extracted one-per-call**, so you can add **any number** at once
-  (each PDF must be < ~700 KB; a big dump just makes one engine run take a few extra minutes — add a
-  per-run cap if that bites). Only *screenshots* are grouped; the heavy case is one order spanning many
-  screenshots.
+- **Batch size:** invoice **PDFs are extracted one-per-call** (≤ ~700 KB each), so you can add **any
+  number** at once. Calls run **`POOL`=4 concurrently** and a **`RUN_FILE_CAP`=12 per-run cap** spreads
+  many separate adds across runs (a single bigger batch still runs in full). Only *screenshots* are
+  grouped; the heavy case is one order spanning many screenshots.

@@ -10,5 +10,15 @@
   "theme_color": "#2c5e8f",
   "icons": [
     { "src": "speed-rupee-logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
-  ]
+  ],
+  "share_target": {
+    "action": "./share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "files": [
+        { "name": "files", "accept": ["image/*", "application/pdf"] }
+      ]
+    }
+  }
 }
