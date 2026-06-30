@@ -382,7 +382,17 @@ function catOptions(selected){ return allCats().map(c=>`<option ${c===selected?'
 function load(){ try{ const d=JSON.parse(localStorage.getItem(KEY))||{}; return {receipts:d.receipts||[], settings:d.settings||{}}; }catch(e){ return {receipts:[],settings:{}}; } }
 function saveLocal(){ localStorage.setItem(KEY, JSON.stringify(state)); }
 function loadQueue(){ try{ return JSON.parse(localStorage.getItem(QKEY))||{}; }catch(e){ return {}; } }
-function saveQueue(q){ localStorage.setItem(QKEY, JSON.stringify(q)); }
+// localStorage holds only a tiny {id:{vendor}} marker (so a pending order survives refresh).
+// The heavy capture bytes (screenshots/PDFs) go to IndexedDB — localStorage's ~5 MB cap can't
+// hold a batch of PDFs, and silently overflowing it was wiping the whole queue.
+function saveQueue(q){ try{ localStorage.setItem(QKEY, JSON.stringify(q)); }catch(e){ toast('Storage full — couldn’t save the queue'); } }
+const IDB_DB='mfmf', IDB_STORE='queue';
+function idbOpen(){ return new Promise((res,rej)=>{ const rq=indexedDB.open(IDB_DB,1);
+  rq.onupgradeneeded=()=>{ const db=rq.result; if(!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE,{keyPath:'id'}); };
+  rq.onsuccess=()=>res(rq.result); rq.onerror=()=>rej(rq.error); }); }
+function idbPut(rec){ return idbOpen().then(db=>new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,'readwrite'); tx.objectStore(IDB_STORE).put(rec); tx.oncomplete=()=>res(true); tx.onerror=()=>rej(tx.error); tx.onabort=()=>rej(tx.error); })); }
+function idbGet(id){ return idbOpen().then(db=>new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,'readonly'); const rq=tx.objectStore(IDB_STORE).get(id); rq.onsuccess=()=>res(rq.result||null); rq.onerror=()=>rej(rq.error); })); }
+function idbDel(id){ return idbOpen().then(db=>new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,'readwrite'); tx.objectStore(IDB_STORE).delete(id); tx.oncomplete=()=>res(true); tx.onerror=()=>rej(tx.error); tx.onabort=()=>rej(tx.error); })); }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function inr(n){ return '₹'+Math.round(n||0).toLocaleString('en-IN'); }
 function toMs(v){ if(v==null) return 0; if(typeof v==='number') return v;
@@ -599,13 +609,16 @@ function compress(file){
       let q=0.72, data=c.toDataURL('image/jpeg',q); while(data.length>780000 && q>0.4){ q-=0.08; data=c.toDataURL('image/jpeg',q); } res(data); };
     img.onerror=rej; img.src=url; });
 }
-function submitOrder(){
+async function submitOrder(){
   if(!draftImages.length) return;
   const id=uid();
-  state.receipts.push({ id, vendor:draftVendor, status:'pending', screenshots:draftImages.length, createdAt:Date.now() }); saveLocal();
-  const q=loadQueue(); q[id]={vendor:draftVendor, images:draftImages.slice()}; saveQueue(q);
-  flushQueue();
+  const vendor=draftVendor, images=draftImages.slice();
+  state.receipts.push({ id, vendor, status:'pending', screenshots:images.length, createdAt:Date.now() }); saveLocal();
+  const q=loadQueue(); q[id]={vendor}; saveQueue(q);                 // tiny marker; bytes live in IndexedDB
+  try{ await idbPut({id, vendor, images}); }
+  catch(e){ toast('Could not store files for upload'); }
   toast(window.__signedIn?'Sent for analysis':'Saved — sign in to analyze'); go('home');
+  flushQueue();
 }
 
 /* ============================ MANUAL / EDIT ============================ */
@@ -689,7 +702,7 @@ function saveManual(){
 function deleteOrder(id){
   if(!id || !confirm('Delete this whole order? This cannot be undone.')) return;
   state.receipts=state.receipts.filter(r=>r.id!==id);
-  const q=loadQueue(); if(q[id]){ delete q[id]; saveQueue(q); }
+  const q=loadQueue(); if(q[id]){ delete q[id]; saveQueue(q); } idbDel(id).catch(()=>{});
   saveLocal();
   if(window.__signedIn && window.__deleteReceiptDoc) window.__deleteReceiptDoc(id);
   const back=manualReturn; editingId=null; toast('Order deleted'); go(back==='add'?'orders':back);
@@ -883,7 +896,13 @@ function saveReceipt(r){
 async function flushQueue(){
   if(!window.__signedIn || !window.__uploadPending) return;
   const q=loadQueue();
-  for(const id of Object.keys(q)){ const ok=await window.__uploadPending({receiptId:id, vendor:q[id].vendor, images:q[id].images}); if(ok){ delete q[id]; saveQueue(q); } }
+  for(const id of Object.keys(q)){
+    let images=(q[id] && q[id].images) || null;                       // legacy queues stored bytes inline
+    if(!images){ const rec=await idbGet(id).catch(()=>null); images=rec&&rec.images; }
+    if(!images || !images.length){ delete q[id]; saveQueue(q); idbDel(id).catch(()=>{}); continue; }
+    const ok=await window.__uploadPending({receiptId:id, vendor:q[id].vendor, images});
+    if(ok){ delete q[id]; saveQueue(q); idbDel(id).catch(()=>{}); }
+  }
 }
 async function pushLocalReceipts(){
   if(!window.__signedIn || !window.__uploadReceiptDoc) return;
