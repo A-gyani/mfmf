@@ -67,8 +67,8 @@ multi-select **or** one-at-a-time shares accumulate into one order). SW cache is
 | File | Purpose |
 |---|---|
 | `index.html` | The entire app — UI, all screens, capture, tagging, insights, export, Firebase sync. ~900 lines. |
-| `sw.js` | Service worker: caches the shell (`CORE` list) + network-first navigation so deploys auto-update. **Bump `CACHE` every deploy.** |
-| `manifest.webmanifest` | PWA metadata; icon → `speed-rupee-logo.svg`. |
+| `sw.js` | Service worker: caches the shell (`CORE` list) + network-first navigation so deploys auto-update; also **catches the Share Target POST** and stashes files in the `mfmf-shared` cache (see §7). **Bump `CACHE` every deploy.** |
+| `manifest.webmanifest` | PWA metadata; icon → `speed-rupee-logo.svg`; declares the **`share_target`** (Android share-sheet entry — see §7). |
 | `speed-rupee-logo.svg` | App logo (blue→pink gradient tile + ₹). Used as icon + in the home header. |
 | `bg.jpg` | Full-screen app wallpaper (pastel finance-icon image, optimized to ~31 KB). |
 | `SETUP.md`, `CLAUDE.md` | Docs. |
@@ -411,6 +411,7 @@ task first (or just `Start-ScheduledTask` and read the log).
 | Change the **vision extraction / grouping / dedup** | `buildPrompt()`/`buildGroupPrompt()` and the main loop in `automation/analyze.js`; dedup keys = `idKey()`/`contentKey()`/`isDup()`/`remember()`. |
 | Change a **screen's layout/content** | the matching `render*()` function + that screen's `<section>` markup + CSS. |
 | Change **tagging** behaviour | `tagItem`/`tagAll` (Tag screen) and `setRowTag`/`saveManual` (editor). |
+| Change **Share Target** (accepted types / accumulation / clear rules) | `share_target` in `manifest.webmanifest` + the POST handler in `sw.js` + `consumeSharedFiles()`/`clearSharedFiles()` (and the leave-Add hook in `go()`) in `index.html`. |
 | Change **Insights** metrics/charts | `renderInsights` + `monthlyTrend`. |
 | Change **Excel** sheets/columns | `exportExcel()`. |
 | Change **colours / theme / wallpaper** | `:root` CSS variables; `bg.jpg` (wallpaper) / `speed-rupee-logo.svg` (logo). |
@@ -442,6 +443,12 @@ task first (or just `Start-ScheduledTask` and read the log).
 - **Not signed in / offline:** the app is local-first (manual entry, tagging, Insights, export all work
   on `localStorage`), but screenshot/PDF **analysis needs sign-in** (files queue locally and only upload
   to `inbox` on sign-in, then analyze on the next engine run).
+- **Share Target is Android-only** (Chrome). iOS/Safari has no Web Share Target, so on iPhone the
+  share sheet won't list MF, MF! — the normal in-app upload/PDF flow still works there. The share
+  sheet only offers the app for **images + PDFs** (the `accept` types); sharing plain text/links won't
+  surface it (a text→manual-entry path is a possible v2). Edge case: removing a thumbnail with ✕ and
+  then sharing *another* screenshot before sending re-adds the removed one (the `mfmf-shared` cache
+  still holds it — `rmThumb` doesn't map back to a cache key); remove-then-send works fine.
 - Dedup content fallback (no printed order id) keys on `date + sorted item prices`, so two genuinely
   identical-priced orders on the same day could be flagged as one — rare; loosen `contentKey()` if it bites.
 - **Batch size:** invoice **PDFs are extracted one-per-call** (≤ ~700 KB each), so you can add **any

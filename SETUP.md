@@ -85,6 +85,8 @@ Publish.
 - ✅ **Phase 3** — Tag screen (per-item Personal/Shared + bulk) · Orders tab (sort/filter) · edit + delete
 - ✅ **Phase 4** — Insights (by category, by vendor, monthly trend, most-bought)
 - ✅ **Phase 5** — Excel export (full multi-sheet workbook + shared-items-for-flatmate)
+- ✅ **Share Target (Android)** — share Blinkit/Zepto screenshots or invoice PDFs straight into the app
+  from the share sheet; multi-select or one-at-a-time shares accumulate into a single order
 - ⏳ Register the Windows Scheduled Task (see `automation/README.md`) so phone screenshots auto-analyze
 
 ## Files
