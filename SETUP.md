@@ -91,5 +91,5 @@ Publish.
 
 ## Files
 - `index.html` — the whole app (UI + capture + tag + insights + export + Firebase sync)
-- `sw.js` · `manifest.webmanifest` · `icon.svg` · `header.jpg` — PWA shell
+- `sw.js` · `manifest.webmanifest` · `speed-rupee-logo.svg` · `bg.jpg` — PWA shell
 - `automation/` — the Claude-vision analysis engine (`analyze.js`, `check.js`, `run-analyze.ps1`)
