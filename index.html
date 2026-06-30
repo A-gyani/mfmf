@@ -753,13 +753,13 @@ function orderReconciles(r){
   return Math.abs((t-itemSum)-(dlv+hnd+tp+tx-dsc)) <= Math.max(2, t*0.01);
 }
 function chargeAgg(rs){
-  const c={delivery:0,taxes:0,handling:0,tip:0,savings:0,unaccounted:0,pdfN:0,n:rs.length};
+  const c={delivery:0,taxes:0,taxesIncl:0,handling:0,tip:0,savings:0,unaccounted:0,pdfN:0,n:rs.length};
   rs.forEach(r=>{
     const f=r.fees||{}, itemSum=(r.items||[]).reduce((s,it)=>s+(Number(it.price)||0),0);
     const dlv=Number(f.delivery)||0, hnd=(Number(f.handling)||0)+(Number(f.packaging)||0), tp=Number(f.tip)||0, dsc=Number(f.discount)||0, tx=Number(r.tax)||0;
     const t=Number(r.total)||0, gap=t-itemSum;
     if(r.source==='pdf') c.pdfN++;
-    if(orderReconciles(r)){ c.delivery+=dlv; c.taxes+=tx; c.handling+=hnd; c.tip+=tp; c.savings+=dsc; c.unaccounted+=(gap-(dlv+hnd+tp+tx-dsc)); }
+    if(orderReconciles(r)){ c.delivery+=dlv; c.taxes+=tx; c.taxesIncl+=Number(r.taxIncl)||0; c.handling+=hnd; c.tip+=tp; c.savings+=dsc; c.unaccounted+=(gap-(dlv+hnd+tp+tx-dsc)); }
     else c.unaccounted+=gap;
   });
   return c;
@@ -771,9 +771,10 @@ function chargesPanel(rs, itemsTotal, total){
     +(Math.round(c.unaccounted)!==0?`<div class="chgRow muted"><span>Other charges</span><span>${inr(c.unaccounted)}</span></div>`:'');
   const hint=(Math.round(c.unaccounted)>Math.max(5,total*0.01) && c.pdfN<c.n)
     ? `<div class="chgHint">Add invoice PDFs for exact taxes &amp; delivery — ${c.pdfN}/${c.n} orders are exact.</div>` : '';
+  const inclGst = Math.round(c.taxesIncl)!==0 ? `<div class="chgRow muted"><span>of which GST (incl.)</span><span>${inr(c.taxesIncl)}</span></div>` : '';
   return `<div class="sectionLabel">Charges &amp; taxes</div><div class="chgPanel">`
     + `<div class="chgRow"><span>Items</span><span>${inr(itemsTotal)}</span></div>${lines}`
-    + `<div class="chgRow tot"><span>Total spend</span><span>${inr(total)}</span></div></div>${hint}`;
+    + `<div class="chgRow tot"><span>Total spend</span><span>${inr(total)}</span></div>${inclGst}</div>${hint}`;
 }
 // settle-up: an order's net delivery+taxes+charges (− discount) apportioned to the shared items'
 // share of the bill — only when the order reconciles (exact, mostly PDFs); else item-only.
@@ -873,7 +874,7 @@ async function exportExcel(mode){
       cat[it.category||'General']=(cat[it.category||'General']||0)+pr; });
     const v=r.vendor||'Other'; (ven[v]=ven[v]||{sum:0,c:0}); ven[v].sum+=itemSum; ven[v].c++;
     const rec=orderReconciles(r), f=r.fees||{};   // only export fee numbers we trust (reconciled orders)
-    const dlv=rec?(Number(f.delivery)||0):'', tx=rec?(Number(r.tax)||0):'', sv=rec?(Number(f.discount)||0):'';
+    const dlv=rec?(Number(f.delivery)||0):'', tx=rec?(Number(r.tax)||Number(r.taxIncl)||0):'', sv=rec?(Number(f.discount)||0):'';
     ordersAoa.push([dstr(r),r.vendor||'',(r.items||[]).length,Number(r.total)||0,dlv,tx,sv,p,s,r.status]); });
   const catAoa=[['Category','Spend (₹)'],...Object.entries(cat).sort((a,b)=>b[1]-a[1])];
   const venAoa=[['Vendor','Orders','Items (₹)'],...Object.entries(ven).sort((a,b)=>b[1].sum-a[1].sum).map(([v,o])=>[v,o.c,o.sum])];
