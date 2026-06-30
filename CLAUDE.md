@@ -40,7 +40,7 @@ The phone alone cannot analyze.
 (repo `https://github.com/A-gyani/mfmf`). Done: capture (screenshot, **invoice PDF**, **or**
 manual), vision analysis with **group-then-extract** + **robust duplicate detection**, tagging
 (per-item + bulk), Orders (sort/filter/edit/delete), Insights (tax-reconciled), Excel export,
-Firebase sync, PWA install, 15-min auto-analyze Scheduled Task. SW cache is at **`mfmf-v17`**
+Firebase sync, PWA install, 15-min auto-analyze Scheduled Task. SW cache is at **`mfmf-v18`**
 (bump it on every deploy — see §10).
 
 ---
@@ -126,14 +126,20 @@ writes `inbox` docs + a placeholder `receipt`; the engine consumes `inbox` and f
     createdAt,          // ms epoch or serverTimestamp
     screenshots,        // count
     fees:{delivery,handling,packaging,tip,discount},
-    tax,                // GST/taxes total (number) — reliably read from PDF invoices
+    tax,                // ADDITIVE tax (number). 0 for PDF orders since `price` is gross (tax
+                        //   already inside it); only legacy/screenshot pre-tax orders carry tax>0.
+    taxIncl,            // GST+cess ALREADY INCLUDED in the gross item prices (informational note only)
     source,             // 'pdf' | 'screenshot' | 'manual' — drives charge-reconciliation trust
-    items:[ {id, name, qty, unit, price, category, tag} ],  // tag: 'personal'|'shared'|null
+    items:[ {id, name, qty, unit, price, category, tag} ],  // price = GROSS, what you PAID incl. tax
     manual:true|undefined }
   ```
-  An order **reconciles** when `Σitems + delivery + handling + packaging + tip + tax − discount ≈ total`
-  (exact for PDFs). Insights/Export only trust the itemised charges/tax when an order reconciles;
-  otherwise the unexplained gap is shown as "Other charges" / left out of settle-up.
+  **`item.price` is the gross paid amount (incl. GST/cess)** — the invoice's per-line "Total", NOT the
+  pre-tax "Taxable Value". (Before 2026-06-30 PDFs stored pre-tax prices + an additive `tax`, which made
+  high-tax items look cheap — e.g. a cigarette taxed ~83% showed ₹54 instead of the ₹100 paid.) So an
+  order **reconciles** when `Σitems + delivery + handling + packaging + tip − discount ≈ total` (tax is
+  inside the items). The app keeps the old formula `… + tax …` and it still holds because gross orders
+  store `tax:0`; `taxIncl` is shown as an "of which GST (incl.)" note. Insights/Export only trust the
+  itemised charges when an order reconciles; otherwise the gap is "Other charges" / left out of settle-up.
   `status` ∈ `pending` → `analyzing` → `ready` → `tagged`; plus `duplicate` (a dismissible
   "already analyzed" notice). Manual entries skip straight to `ready`/`tagged`.
 - `inbox/{autoId}` — transient, one **per file** (screenshot **or** invoice PDF): `{ uid, batchId,
@@ -248,9 +254,9 @@ Runs on the laptop, on the Max plan ($0). Files: `analyze.js` (the engine), `che
    detected order is then either:
    - **new** → created (first reuses the placeholder, extras become new docs);
    - **upgrade** → a **PDF** matching an existing **non-PDF** order: **replace** it with the PDF's exact
-     **pre-tax items + tax + total** (q-comm PDFs itemise pre-tax prices + a GST line that reconciles
-     exactly; screenshots show tax-inclusive prices — so you can't just add the tax), **carrying your
-     tags across by item name** (`normName`). A batch that's all upgrades drops its placeholder;
+     **gross (paid) items + total** (each `price` = the invoice per-line "Total" incl. GST/cess, so items
+     sum to the total; `tax:0`, `taxIncl`=embedded GST), **carrying your tags across by item name**
+     (`normName`). A batch that's all upgrades drops its placeholder;
    - **duplicate** → skipped (logged); a batch that's **entirely** plain dups becomes one
      `status:'duplicate'` notice.
    Each vision call is retried a few times (`runExtract`) so one malformed response doesn't abort a batch.
