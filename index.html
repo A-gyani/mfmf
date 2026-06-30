@@ -405,6 +405,7 @@ function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c=>({'&':'&am
 
 /* ============================ NAV ============================ */
 function go(id){
+  if(current==='add' && id!=='add') clearSharedFiles();   // leaving Add → the shared-screenshot draft is resolved (sent or abandoned)
   ['home','orders','tag','insights','export','add','manual'].forEach(s=>document.getElementById(s).classList.toggle('hidden', s!==id));
   document.getElementById('fab').classList.toggle('hidden', id!=='home');
   [...document.querySelectorAll('.navItem')].forEach(n=>n.classList.toggle('on', n.dataset.screen===id));
@@ -925,21 +926,25 @@ function renderSyncRow(){ const el=document.getElementById('syncRow'); if(el) el
 renderHome();
 
 /* Share Target — files flung in from Android's share sheet (manifest → sw.js stashes them,
-   redirects here with ?shared=1). Pull them out of the cache and drop them into the Add flow. */
+   redirects here with ?shared=1). The stash persists across reloads so screenshots shared
+   one-at-a-time rebuild the SAME Add draft = one multi-screenshot order; it's drained only
+   when the order is Sent or you leave Add (clearSharedFiles, called from go()). */
+async function clearSharedFiles(){ try{ const c=await caches.open('mfmf-shared'); for(const k of await c.keys()) await c.delete(k); }catch(_){} }
 async function consumeSharedFiles(){
   if(new URLSearchParams(location.search).get('shared')!=='1') return;
   history.replaceState(null,'',location.pathname);          // drop ?shared=1 so a refresh won't repeat
   try{
     const cache=await caches.open('mfmf-shared');
-    const files=[];
+    const now=Date.now(), files=[];
     for(const k of await cache.keys()){
       const res=await cache.match(k); if(!res) continue;
+      if(now-(+res.headers.get('X-Shared-At')||0)>36e5){ await cache.delete(k); continue; }   // drop stale (>1h) abandoned shares
       const blob=await res.blob();
       const name=decodeURIComponent(res.headers.get('X-File-Name')||'shared');
       files.push(new File([blob], name, {type:blob.type||res.headers.get('Content-Type')||''}));
-      await cache.delete(k);
     }
-    if(files.length){ openAdd(); await onFiles(files); toast(files.length+(files.length>1?' files':' file')+' shared in — pick a vendor, then Send'); }
+    if(files.length){ openAdd(); await onFiles(files);
+      toast(files.length+(files.length>1?' screenshots in — share more or Send':' screenshot in — share more or Send')); }
   }catch(_){}
 }
 consumeSharedFiles();

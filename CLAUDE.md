@@ -41,8 +41,9 @@ The phone alone cannot analyze.
 manual), vision analysis with **group-then-extract** + **robust duplicate detection**, tagging
 (per-item + bulk), Orders (sort/filter/edit/delete), Insights (tax-reconciled), Excel export,
 Firebase sync, PWA install, 15-min auto-analyze Scheduled Task, **Share Target** (share a
-Blinkit/Zepto screenshot or invoice PDF straight into the app from Android's share sheet). SW
-cache is at **`mfmf-v19`** (bump it on every deploy — see §10).
+Blinkit/Zepto screenshot or invoice PDF straight into the app from Android's share sheet —
+multi-select **or** one-at-a-time shares accumulate into one order). SW cache is at **`mfmf-v20`**
+(bump it on every deploy — see §10).
 
 ---
 
@@ -199,8 +200,12 @@ values added this session). Constants: `VENDORS`, `VENDOR_COLOR`, `CATS`.
   `files` ← `image/*`+`application/pdf`). Since Pages is static, **`sw.js` catches the POST** to
   `./share-target`, stashes the file(s) in the `mfmf-shared` cache, and redirects to `./?shared=1`.
   On boot, `consumeSharedFiles()` reads that cache and feeds the files into `openAdd()`+`onFiles()`,
-  so a shared screenshot lands in the Add screen ready to send. iOS/Safari has no Share Target →
-  it falls back to the normal upload flow there. (`mfmf-shared` is excluded from the SW activate sweep.)
+  so a shared screenshot lands in the Add screen ready to send. **Multi-screenshot orders:** the SW
+  *accumulates* shares (timestamped keys, no clear-on-write) so screenshots shared one-at-a-time
+  rebuild the **same** Add draft = one order; the stash is drained only on **Send** or when you
+  **leave Add** (`clearSharedFiles()`, called from `go()`), with a 1h staleness prune so two separate
+  orders never merge. iOS/Safari has no Share Target → it falls back to the normal upload flow there.
+  (`mfmf-shared` is excluded from the SW activate sweep.)
 - **Manual / editor:** `openManual` (new), `editOrder(id)` (loads an existing order into the
   same form), `addItemRow` (name / **qty `×`** / ₹ line-total / category / tag — preserves `qty`
   and `unit`; never hardcode qty), `setRowTag`, `recalcTotal`, `catChanged`

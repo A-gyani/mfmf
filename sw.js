@@ -1,6 +1,6 @@
 // MF, MF! service worker — cache the shell, and auto-update so new deploys land
 // without the manual "clear the app" dance (same pattern as Charaivati).
-const CACHE = 'mfmf-v19';
+const CACHE = 'mfmf-v20';
 const SHARE_CACHE = 'mfmf-shared';   // transient: files handed in via the Share Target, read once by the page
 const CORE = ['./', './index.html', './manifest.webmanifest', './speed-rupee-logo.svg', './bg.jpg'];
 
@@ -26,13 +26,20 @@ self.addEventListener('fetch', e => {
       try {
         const form = await req.formData();
         const cache = await caches.open(SHARE_CACHE);
-        for (const k of await cache.keys()) await cache.delete(k);   // drop any stale share
+        const now = Date.now();
+        // Keep prior shares so screenshots shared one-at-a-time accumulate into ONE order; but
+        // prune anything older than 1h (an abandoned share) so two separate orders don't merge.
+        for (const k of await cache.keys()) {
+          const r = await cache.match(k);
+          if (!r || now - (+r.headers.get('X-Shared-At') || 0) > 36e5) await cache.delete(k);
+        }
         let i = 0;
         for (const f of form.getAll('files')) {
           if (!f || typeof f === 'string') continue;                 // skip empty/text parts
-          await cache.put('shared-' + (i++), new Response(f, {
+          await cache.put('shared-' + now + '-' + (i++), new Response(f, {
             headers: { 'Content-Type': f.type || 'application/octet-stream',
-                       'X-File-Name': encodeURIComponent(f.name || 'shared') }
+                       'X-File-Name': encodeURIComponent(f.name || 'shared'),
+                       'X-Shared-At': String(now) }
           }));
         }
       } catch (_) { /* ignore — the page just opens an empty Add screen */ }
