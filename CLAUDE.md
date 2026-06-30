@@ -40,7 +40,7 @@ The phone alone cannot analyze.
 (repo `https://github.com/A-gyani/mfmf`). Done: capture (screenshot, **invoice PDF**, **or**
 manual), vision analysis with **group-then-extract** + **robust duplicate detection**, tagging
 (per-item + bulk), Orders (sort/filter/edit/delete), Insights (tax-reconciled), Excel export,
-Firebase sync, PWA install, 15-min auto-analyze Scheduled Task. SW cache is at **`mfmf-v14`**
+Firebase sync, PWA install, 15-min auto-analyze Scheduled Task. SW cache is at **`mfmf-v17`**
 (bump it on every deploy — see §10).
 
 ---
@@ -144,8 +144,13 @@ writes `inbox` docs + a placeholder `receipt`; the engine consumes `inbox` and f
 
 ### Local (browser)
 - `localStorage['mfmf.v1']` = `{ receipts:[...], settings:{} }` (mirror of receipts).
-- `localStorage['mfmf.queue']` = `{ [receiptId]: {vendor, images:[dataURL]} }` — screenshots
-  captured but not yet uploaded (flushed to `inbox` on sign-in).
+- `localStorage['mfmf.queue']` = `{ [receiptId]: {vendor} }` — a **tiny marker** for each captured-but-
+  not-yet-uploaded order, so its `pending` placeholder survives a refresh (`__applyRemoteReceipts`
+  keeps a local order only if it's in this queue or `_needsUpload`). Flushed to `inbox` on sign-in.
+- **IndexedDB** db `mfmf`, store `queue` (keyPath `id`) = `{ id, vendor, images:[dataURL] }` — the heavy
+  capture **bytes** (screenshots/PDFs). They live here, **not** in localStorage: a batch of PDFs (≤950 KB
+  each) blows past localStorage's ~5 MB cap, and the silent `QuotaExceededError` used to wipe the queue.
+  `idbPut/idbGet/idbDel` manage it; `flushQueue` reads bytes from here to upload, deletes on success.
 
 ### Firestore security rules
 Owner-only on `users/**`; `inbox` is **create-only** for the signed-in user (the engine reads
